@@ -1,0 +1,1198 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;color:#202939;background:#f9fafb}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:20px 28px;background:white;border-bottom:1px solid #e4e7ec}h1{font-size:24px;margin:4px 0}h2{font-size:19px;margin:8px 0 16px}p{font-size:13px;line-height:1.6;color:#475467;margin:5px 0}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#6941c6;font-weight:700}.primary{background:#6941c6;color:white;border:0;border-radius:8px;padding:12px 16px;font-weight:600}main{height:calc(100vh - 112px);min-height:540px;display:grid;grid-template-columns:245px minmax(300px,1fr) 310px}.sidebar,.review{padding:20px;background:white;overflow:auto}.sidebar{border-right:1px solid #e4e7ec}.review{border-left:1px solid #e4e7ec}label{display:block;font-size:13px;font-weight:600;margin:12px 0 7px}select,input:not([type=checkbox]),textarea{width:100%;border:1px solid #d0d5dd;border-radius:8px;padding:10px;background:white;margin-top:7px}textarea{resize:vertical}.case-list{margin-top:18px;display:grid;gap:7px}.case{border:1px solid #e4e7ec;border-radius:8px;background:white;text-align:left;padding:11px;display:flex;flex-direction:column;gap:5px}.case.active{border-color:#6941c6;background:#f9f5ff}.case span{font-size:12px;color:#667085}.case .done{color:#027a48}.map-panel{position:relative;min-width:0}.map{height:100%;width:100%}.map-toolbar{position:absolute;top:16px;right:16px;left:auto;z-index:2;background:white;border:1px solid #e4e7ec;border-radius:10px;display:flex;gap:18px;padding:5px 15px;box-shadow:0 3px 8px #10182814}.map-toolbar label{display:flex;align-items:center;gap:6px;margin:8px 0}.legend{display:inline-block;width:22px;border-top:4px solid}.legend.blue{border-color:#2563eb}.legend.orange{border-color:#ea580c}.hint{background:#f9fafb;border-radius:8px;padding:12px;margin:16px 0}.notice{position:absolute;bottom:20px;left:20px;background:white;padding:12px;border-radius:8px;color:#b42318}@media(max-width:900px){main{grid-template-columns:190px 1fr;grid-template-rows:65vh auto;height:auto}.review{grid-column:1/-1;border-top:1px solid #e4e7ec}.sidebar{max-height:65vh}.map-panel{height:65vh}}
+/* Keep OpenLayers navigation separate from the route legend. */
+.map-panel .ol-zoom{top:16px;left:16px}
+.map-panel .ol-attribution{bottom:8px;right:8px}
+
+/* OpenLayers attribution: bottom-right, without browser default list styling. */
+.map-panel .ol-attribution{position:absolute;right:10px;bottom:10px;left:auto;top:auto;max-width:calc(100% - 20px);padding:3px 7px;border-radius:6px;background:rgba(255,255,255,.88);font-size:11px;line-height:1.4}
+.map-panel .ol-attribution ul{margin:0;padding:0;list-style:none;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.map-panel .ol-attribution li{margin:0;padding:0;list-style:none;display:inline}
+.map-panel .ol-attribution button{display:none}
+.map-panel .ol-attribution a{color:#475467;text-decoration:underline}
+
+.legend.point{width:14px;height:14px;border:2px solid #fff;border-radius:50%;background:#15803d;box-shadow:0 0 0 1px #15803d}
+.point-popup{background:#fff;border:1px solid #d0d5dd;border-radius:8px;padding:9px 12px;box-shadow:0 3px 12px #10182833;font-size:12px;white-space:nowrap;pointer-events:none}
+.point-popup:empty{display:none}
+.point-popup strong{display:block;margin-bottom:3px}
+.point-popup small{display:block;color:#667085;margin-top:3px}
+.map-toolbar{flex-wrap:wrap;max-width:calc(100% - 100px)}
+
+/* Accessible underline tabs in the review detail panel. */
+.review-tabs{display:flex;gap:4px;margin:16px 0 20px;border-bottom:1px solid #e4e7ec}
+.review-tabs button{flex:1;min-width:0;padding:11px 5px 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:#667085;font-size:12px;font-weight:600;white-space:nowrap}
+.review-tabs button:hover{color:#344054;background:#f9fafb}
+.review-tabs button.active,.review-tabs button[aria-selected="true"]{color:#6941c6;border-bottom-color:#6941c6}
+.review-tabs button:focus-visible{outline:2px solid #6941c6;outline-offset:-2px;border-radius:3px}
+.map-toolbar .basemap-label{display:flex;align-items:center;gap:7px;border-right:1px solid #e4e7ec;padding-right:14px;white-space:nowrap}
+.map-toolbar .basemap-label select{width:auto;max-width:160px;margin:0;padding:5px 8px;font-size:12px}
+@media(max-width:1100px){.map-toolbar{gap:10px}.map-toolbar .basemap-label{border-right:0}}
+
+/* Keep the basemap selector separate from the three route-layer toggles. */
+.map-toolbar{display:grid;grid-template-columns:repeat(3,max-content);column-gap:16px;row-gap:8px;align-items:center;max-width:calc(100% - 100px);padding:10px 14px;flex-wrap:unset}
+.map-toolbar .basemap-label{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0;padding:0 0 9px;border-right:0;border-bottom:1px solid #e4e7ec}
+.map-toolbar .basemap-label select{max-width:none;width:185px}
+.map-toolbar label:not(.basemap-label){margin:0;white-space:nowrap}
+@media(max-width:650px){.map-toolbar{column-gap:9px;padding:9px;max-width:calc(100% - 80px)}.map-toolbar label:not(.basemap-label){font-size:11px}.map-toolbar .basemap-label select{width:140px}}
+
+/* Category totals are based on the complete directed-link export. */
+.filter-counts{display:grid;gap:3px;margin:14px 0 8px}
+.filter-count{width:100%;display:flex;align-items:center;justify-content:space-between;gap:9px;text-align:left;background:transparent;border:1px solid transparent;border-radius:7px;padding:8px 9px;color:#475467;font-size:12px}
+.filter-count span{flex:1}
+.filter-count strong{font-variant-numeric:tabular-nums;color:#344054}
+.filter-count:hover{background:#f9fafb}
+.filter-count.active{background:#f9f5ff;border-color:#d6bbfb;color:#6941c6}
+.filter-count.active strong{color:#6941c6}
+
+/* Searchable municipality multi-select */
+.municipality-actions{display:flex;justify-content:space-between;gap:8px;margin:7px 0}
+.municipality-actions button{border:0;background:transparent;color:#6941c6;font-size:12px;padding:5px 0}
+.municipality-options{max-height:180px;overflow:auto;border:1px solid #d0d5dd;border-radius:8px;padding:5px 9px}
+.municipality-options label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:400;margin:0;padding:6px 0;cursor:pointer}
+.municipality-options input[type=checkbox]{margin:0;flex-shrink:0}
+
+.comparison-toggle{display:flex;gap:4px;border:1px solid #d0d5dd;border-radius:8px;padding:3px;margin:10px 0 16px}
+.comparison-toggle button{flex:1;border:0;background:transparent;padding:9px;border-radius:6px;font-size:13px}
+.comparison-toggle button.active{background:#6941c6;color:white;font-weight:600}
+
+
+/* Granskningslayout: sträcklistan och filtren scrollar oberoende. */
+@media (min-width: 901px) {
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .route-list-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 55%;
+    min-height: 180px;
+    padding: 16px;
+    overflow: hidden;
+    border-bottom: 1px solid #e4e7ec;
+  }
+
+  .route-list-section h2 {
+    flex-shrink: 0;
+    margin: 0 0 12px;
+    font-size: 16px;
+  }
+
+  .route-list-section .case-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin-top: 0;
+    align-content: start;
+  }
+
+  .sidebar-filters {
+    flex: 1 1 45%;
+    min-height: 100px;
+    overflow-y: auto;
+    padding: 16px;
+  }
+}
+
+
+/* Infällbar detaljpanel och expanderande karta */
+@media (min-width: 901px) {
+  main.review-collapsed {
+    grid-template-columns: 245px minmax(300px, 1fr);
+  }
+
+  main.review-collapsed .review {
+    display: none;
+  }
+}
+
+main {
+  position: relative;
+}
+
+.review-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  padding: 9px 12px;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px #10182820;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-toggle:hover {
+  background: #f9f5ff;
+  border-color: #6941c6;
+}
+
+@media (min-width: 901px) {
+  main:not(.review-collapsed) .review-toggle {
+    right: 326px;
+  }
+}
+
+@media (max-width: 900px) {
+  main.review-collapsed .review {
+    display: none;
+  }
+
+  .review-toggle {
+    top: 8px;
+    right: 8px;
+  }
+}
+
+
+/* Placera panelknappen utanför kartans lagerkontroller. */
+@media (min-width: 901px) {
+  main:not(.review-collapsed) .review-toggle {
+    top: auto;
+    bottom: 16px;
+    right: 326px;
+  }
+
+  main.review-collapsed .review-toggle {
+    top: auto;
+    bottom: 16px;
+    right: 16px;
+  }
+}
+
+
+/* Knappar i sidhuvudet: export överst, panelkontroll underst. */
+header .header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+header .header-actions .review-toggle {
+  position: static;
+  width: 100%;
+  box-shadow: none;
+  padding: 9px 12px;
+}
+
+header .header-actions .primary {
+  width: 100%;
+}
+
+@media (max-width: 650px) {
+  header {
+    flex-wrap: wrap;
+  }
+
+  header .header-actions {
+    width: 100%;
+  }
+}
+
+
+/* Kompakt, utfällbar filtersektion under sträcklistan. */
+@media (min-width: 901px) {
+  .sidebar .route-list-section {
+    flex: 1 1 auto;
+    min-height: 160px;
+  }
+
+  .sidebar .sidebar-filters {
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: 50%;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  .sidebar .sidebar-filters:not([open]) {
+    overflow: hidden;
+  }
+}
+
+.sidebar-filters > summary {
+  display: list-item;
+  cursor: pointer;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #344054;
+  background: #f9fafb;
+  border-top: 1px solid #e4e7ec;
+}
+
+.sidebar-filters > summary:hover {
+  background: #f2f4f7;
+}
+
+.sidebar-filter-content {
+  padding: 4px 16px 16px;
+}
+
+.sidebar-filters[open] > summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+
+/* Förhindra horisontell scrollning i sträcklistan. */
+.sidebar .route-list-section,
+.sidebar .route-list-section .case-list {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.sidebar .route-list-section .case-list {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar .route-list-section .case-list > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+
+/* Sträcklistans rader ska aldrig tryckas ihop. */
+.sidebar .route-list-section .case-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: max-content;
+  align-content: start;
+  row-gap: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar .route-list-section .case-list > * {
+  height: auto;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+
+/* Tydlig informationshierarki i sträckkorten. */
+.sidebar .case-list .case {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.sidebar .case-list .case-municipality {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.sidebar .case-list .case-quality {
+  display: block;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #475467;
+}
+
+.sidebar .case-list .case-distances {
+  display: block;
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar .case-list .case-comparison {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.sidebar .case-list .case-id {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 400;
+  color: #667085;
+}
+
+.sidebar .case-list .case .done {
+  align-self: flex-start;
+}
+
+
+/* Utfällbara kartlager ovanpå kartan. */
+.map-panel {
+  position: relative;
+}
+
+.map-panel .map-layers {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  width: auto;
+  max-width: calc(100% - 32px);
+}
+
+.map-panel .map-layers > summary {
+  display: block;
+  width: max-content;
+  margin-left: auto;
+  padding: 10px 16px;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px #10182820;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.map-panel .map-layers > summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-panel .map-layers > summary:hover {
+  background: #f9f5ff;
+  border-color: #6941c6;
+}
+
+.map-panel .map-layers[open] {
+  width: min(420px, calc(100% - 32px));
+}
+
+.map-panel .map-layers[open] > summary {
+  border-radius: 8px 8px 0 0;
+}
+
+.map-panel .map-layers .map-toolbar {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px 0 8px 8px;
+  box-shadow: 0 4px 12px #10182820;
+}
+
+.map-panel .map-layers .map-toolbar > * {
+  min-width: 0;
+}
+
+
+/* Håll filterrubriken synlig utan att scrolla hela sidan. */
+@media (min-width: 901px) {
+  .app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .app > header {
+    flex: 0 0 auto;
+  }
+
+  .map-view-container > main {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    min-height: 0;
+  }
+
+  .sidebar .route-list-section {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar .sidebar-filters {
+    flex-shrink: 0;
+  }
+}
+
+
+/* Slutlig placering av detaljpanelens öppna/stäng-knappar. */
+.map-view-container > main > .review-open-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  left: auto;
+  bottom: auto;
+  z-index: 30;
+  width: auto;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px #10182820;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Undvik överlappning med Kartlager när panelen är stängd. */
+.map-view-container > main.review-collapsed .map-layers {
+  right: 160px;
+}
+
+.review .review-heading {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.review .review-heading .eyebrow {
+  margin: 0;
+}
+
+.review .review-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+  color: #475467;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.review .review-close-button:hover,
+.map-view-container > main > .review-open-button:hover {
+  background: #f9f5ff;
+  border-color: #6941c6;
+}
+
+@media (max-width: 900px) {
+  .map-view-container > main.review-collapsed .map-layers {
+    right: 16px;
+    top: 64px;
+  }
+}
+
+
+/* Kompakt identifiering av sträckans ändpunkter. */
+.sidebar .case-list .case-endpoints {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.sidebar .case-list .case-municipality {
+  font-size: 12px;
+  font-weight: 500;
+  color: #667085;
+}
+
+
+/* Global växling mellan sträcka och tid. */
+.sidebar .comparison-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 3px;
+  box-sizing: border-box;
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+}
+
+.sidebar .comparison-toggle button {
+  flex: 1 1 50%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar .comparison-toggle button.active {
+  background: #fff;
+  color: #6941c6;
+  box-shadow: 0 1px 3px #10182820;
+}
+
+.sidebar .comparison-toggle button:hover:not(.active) {
+  background: #e4e7ec;
+}
+
+.sidebar .comparison-toggle button:focus-visible {
+  outline: 2px solid #6941c6;
+  outline-offset: 2px;
+}
+
+
+/* Sökning bland gånglänkar */
+.sidebar .case-search {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.sidebar .case-search:focus {
+  outline: 2px solid #6941c6;
+  outline-offset: 1px;
+}
+
+
+/* Kopierbara identifierare i sträcklistan */
+.sidebar .case-list .case-select {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar .case-list .case-copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.sidebar .case-list .case-copy-actions button {
+  padding: 4px 6px;
+  border: 1px solid #d0d5dd;
+  border-radius: 5px;
+  background: #fff;
+  color: #475467;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.sidebar .case-list .case-copy-actions button:hover {
+  background: #f2f4f7;
+}
+
+.sidebar .case-list .case-copy-actions button:focus-visible,
+.sidebar .case-list .case-select:focus-visible {
+  outline: 2px solid #6941c6;
+  outline-offset: 2px;
+}
+
+
+/* Kompakta kopieringsikoner */
+.sidebar .case-list .case-endpoint-row,
+.sidebar .case-list .case-id-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sidebar .case-list .case-endpoint-value {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar .case-list .case-arrow {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.sidebar .case-list .case-id-row .case-id {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sidebar .case-list .case-copy-icon {
+  flex: 0 0 auto;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #667085;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar .case-list .case-copy-icon:hover {
+  background: #e4e7ec;
+  color: #344054;
+}
+
+
+/* Huvudvyer: populationsöversikt och karta */
+.main-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #f2f4f7;
+}
+
+.main-view-tabs button {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475467;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.main-view-tabs button.active {
+  background: #fff;
+  color: #6941c6;
+  box-shadow: 0 1px 3px #10182820;
+}
+
+.map-view-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.map-view-container > main {
+  flex: 1;
+  min-height: 0;
+}
+
+.map-view-container[hidden],
+.population-overview[hidden] {
+  display: none !important;
+}
+
+.population-overview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.overview-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:24px 0}
+.overview-kpi,.overview-panel{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:20px}
+.overview-kpi{display:flex;flex-direction:column;gap:8px}
+.overview-kpi>span{font-size:13px;color:#475467}
+.overview-kpi strong{font-size:28px;color:#101828}
+.overview-kpi small{color:#667085}
+.overview-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.overview-panel h3{margin:0 0 10px}
+.overview-panel>p{color:#667085;font-size:13px}
+.overview-stacked-bar{display:flex;height:24px;border-radius:6px;overflow:hidden;margin:24px 0}
+.overview-category-row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #eaecf0;font-size:13px}
+.overview-category-row>span:nth-last-child(2){margin-left:auto}
+.overview-category-row>span:last-child{min-width:55px;text-align:right;color:#667085}
+.overview-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.overview-note{margin-top:20px}
+@media(max-width:1100px){.overview-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-panels{grid-template-columns:1fr}}
+@media(max-width:600px){.overview-kpis{grid-template-columns:1fr}}
+
+.municipality-panel{margin-top:18px}
+.municipality-controls{display:flex;flex-wrap:wrap;gap:16px;margin:20px 0}
+.municipality-controls label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#475467}
+.municipality-controls select{padding:8px 10px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;color:#101828}
+.municipality-table-wrap{overflow-x:auto}
+.municipality-table{width:100%;border-collapse:collapse;font-size:13px}
+.municipality-table th,.municipality-table td{padding:11px 12px;text-align:right;border-bottom:1px solid #eaecf0;white-space:nowrap}
+.municipality-table th:first-child,.municipality-table td:first-child{text-align:left}
+.municipality-table th{background:#f9fafb;color:#475467;font-weight:600}
+.municipality-table tbody tr:hover{background:#f9fafb}
+.municipality-table td:last-child strong{color:#b42318}
+
+.municipality-link{
+  border:0;
+  background:transparent;
+  padding:4px 2px;
+  color:#175cd3;
+  font:inherit;
+  font-weight:600;
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.municipality-link:hover{color:#004eeb}
+.municipality-link:focus-visible{outline:2px solid #175cd3;outline-offset:2px}
+.municipality-low{color:#b42318}
+.municipality-low:hover{color:#912018}
+
+
+/* Filter ligger ovanför den scrollbara sträcklistan */
+.sidebar .route-list-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar .route-list-section .sidebar-filters {
+  flex: 0 0 auto;
+  max-height: 50%;
+  overflow-y: auto;
+}
+
+.sidebar .route-list-section .case-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar > .sidebar-filters {
+  display: none;
+}
+
+
+/* ADD-analys i populationsöversikten */
+.add-analysis-panel{margin-bottom:20px}
+.add-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 24px}
+.add-summary>div{display:flex;flex-direction:column;gap:5px;padding:14px;border:1px solid #e4e7ec;border-radius:8px;background:#f9fafb}
+.add-summary span{font-size:12px;color:#475467}
+.add-summary strong{font-size:24px;color:#101828}
+.add-summary small{font-size:12px;color:#667085}
+.add-analysis-panel h4{margin:20px 0 10px;font-size:15px}
+.add-agreement-row{margin:16px 0}
+.add-agreement-heading{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:13px}
+.add-agreement-heading span{color:#667085}
+.add-agreement-percentages{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:7px;font-size:12px;color:#475467}
+@media(max-width:650px){.add-summary{grid-template-columns:1fr}}
+
+
+/* Kompakt kommuntabell med radbrytbara rubriker */
+.municipality-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+.municipality-table th {
+  white-space: normal;
+  overflow-wrap: normal;
+  line-height: 1.3;
+  padding: 10px 7px;
+  font-size: 12px;
+  vertical-align: bottom;
+}
+
+.municipality-table td {
+  padding: 10px 7px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.municipality-table th:first-child,
+.municipality-table td:first-child {
+  padding-left: 12px;
+}
+
+.municipality-table th:last-child,
+.municipality-table td:last-child {
+  padding-right: 12px;
+}
+
+
+/* Fördelning av OTP/GKM-längdkvot */
+.length-analysis-panel { margin-bottom: 20px; }
+.length-bin-chart { display: grid; gap: 12px; margin: 18px 0; }
+.length-bin-row {
+  display: grid;
+  grid-template-columns: minmax(185px, 240px) minmax(100px, 1fr) 75px 65px;
+  align-items: center;
+  gap: 12px;
+}
+.length-bin-label { font-size: 13px; }
+.length-bin-track {
+  height: 22px;
+  background: #e9edf0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.length-bin-bar { display: flex; height: 100%; min-width: 0; }
+.length-bin-bar > div { height: 100%; }
+.length-bin-count, .length-bin-percent {
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 750px) {
+  .length-bin-row {
+    grid-template-columns: minmax(0,1fr) 65px 55px;
+    gap: 6px;
+  }
+  .length-bin-label { grid-column: 1 / -1; }
+}
+
+
+/* Interaktiva längdintervall */
+.length-bin-action {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+.length-bin-action:hover,
+.length-bin-action:focus-visible {
+  text-decoration-color: currentColor;
+}
+.length-bin-segment {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.length-bin-segment:hover,
+.length-bin-segment:focus-visible {
+  filter: brightness(0.82);
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.length-bin-segment:disabled { cursor: default; }
+
+
+/* Klickbara geometriska visualiseringar */
+button.overview-clickable {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.overview-kpi.overview-clickable,
+button.overview-category-row.overview-clickable {
+  width: 100%;
+}
+button.overview-clickable:hover,
+button.overview-clickable:focus-visible {
+  outline: 2px solid #547b94;
+  outline-offset: 2px;
+}
+.overview-bar-action {
+  display: block;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+.overview-bar-action:hover,
+.overview-bar-action:focus-visible {
+  filter: brightness(.82);
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.overview-bar-action:disabled {
+  cursor: default;
+}
+
+
+/* Återställ utseende för klickbara översiktskomponenter */
+button.overview-kpi,
+button.overview-category-row {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: inherit;
+  background: inherit;
+  border: 0;
+  border-radius: inherit;
+  margin: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+button.overview-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: inherit;
+  text-align: left;
+}
+
+button.overview-category-row {
+  display: grid;
+  align-items: center;
+  text-align: left;
+}
+
+button.overview-kpi:hover,
+button.overview-category-row:hover {
+  filter: brightness(.97);
+}
+
+button.overview-kpi:focus-visible,
+button.overview-category-row:focus-visible {
+  outline: 2px solid #547b94;
+  outline-offset: 2px;
+}
+
+
+/* Korrigering: återställ ursprunglig layout */
+button.overview-category-row.overview-clickable {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid #eaecf0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+button.overview-category-row.overview-clickable > span:nth-last-child(2) {
+  margin-left: auto;
+}
+
+button.overview-category-row.overview-clickable > span:last-child {
+  min-width: 55px;
+  text-align: right;
+  color: #667085;
+}
+
+button.overview-kpi.overview-clickable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+}
+
+button.overview-kpi.overview-clickable:hover,
+button.overview-category-row.overview-clickable:hover {
+  background: #f8fafc;
+  filter: none;
+}
+
+button.overview-category-row.overview-clickable:focus-visible,
+button.overview-kpi.overview-clickable:focus-visible {
+  outline: 2px solid #547b94;
+  outline-offset: 2px;
+}
+
+
+/* Klickbara ADD-nyckeltal */
+.add-summary > button.add-summary-action {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-summary > button.add-summary-action:hover {
+  background: transparent;
+  filter: brightness(.85);
+}
+
+.add-summary > button.add-summary-action:focus-visible {
+  outline: 2px solid #547b94;
+  outline-offset: 4px;
+}
+
+
+/* ADD-staplar med bibehållen layout */
+.add-agreement-row .overview-bar-action {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.add-agreement-row .overview-bar-action:disabled {
+  cursor: default;
+}
+
+
+/* Aktivt urval i kartvyn */
+.active-selection {
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid #dce3e8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.active-selection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.active-selection-heading button {
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: #175cd3;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.active-selection-heading button:hover {
+  text-decoration: underline;
+}
+.active-selection-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.active-selection-tags > span {
+  padding: 4px 7px;
+  border: 1px solid #d0dce5;
+  border-radius: 5px;
+  background: #fff;
+  color: #344054;
+  font-size: 12px;
+}
+.active-selection > small {
+  color: #667085;
+  font-size: 12px;
+}
+
+
+/* Kompakt information om aktiva filter inuti filterpanelen */
+.active-filter-count {
+  margin-left: 5px;
+  font-weight: 600;
+  color: #175cd3;
+}
+.filter-active-list {
+  padding: 10px;
+  margin-bottom: 14px;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.filter-active-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.filter-active-heading button {
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  color: #175cd3;
+  cursor: pointer;
+  font-size: 12px;
+}
+.filter-active-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.filter-active-tags button {
+  padding: 5px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 5px;
+  background: #fff;
+  color: #344054;
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-active-tags button:hover {
+  border-color: #175cd3;
+}
+.filter-active-list small {
+  color: #667085;
+}
