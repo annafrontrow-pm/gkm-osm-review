@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
+public/review-data.json
+public/review-data_before_endpoint_ui.json
+src/App.tsx.bak

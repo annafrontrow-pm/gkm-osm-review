@@ -7,13 +7,21 @@ import VectorSource from 'ol/source/Vector';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import GeoJSON from 'ol/format/GeoJSON';
-import { Circle as CircleStyle, Fill, Stroke, Style, Text } from 'ol/style';
+import { Circle as CircleStyle, Fill, Icon, Stroke, Style, Text } from 'ol/style';
 import Overlay from 'ol/Overlay';
 import { createEmpty, extend, isEmpty } from 'ol/extent';
 import { defaults as defaultControls } from 'ol/control/defaults';
 type FeatureCollection = { type: 'FeatureCollection'; features: Array<{ properties?: Record<string, unknown> | null; [key: string]: unknown }> };
 
-type Case = { quality_category?: string; case_id: string; grid_cell: string; severity_band: string; start_gid: string; end_gid: string; related_directed_links: number; otp_60_length_ratio: number|null; details?: Record<string,string|number|null>; contains_add?: boolean|null; municipalities?: Array<{number:string;name:string}> };
+type StopPointInfo = { gid: string; name: string; stop_area_number: string; number: string; designation: string; source: 'gws'|'historical'|'gid_only' };
+function stopLabel(point: StopPointInfo|undefined, gid: string) {
+  if (!point?.name) return `GID ${gid}`;
+  return `${point.name}${point.stop_area_number ? ` (${point.stop_area_number})` : ''}${point.designation ? `, läge ${point.designation}` : ''}`;
+}
+function stopSourceLabel(point: StopPointInfo|undefined) {
+  return point?.source === 'historical' ? 'Historisk uppgift' : point?.source === 'gid_only' || !point ? 'Ej identifierat' : '';
+}
+type Case = { start_stop_point?: StopPointInfo; end_stop_point?: StopPointInfo; quality_category?: string; case_id: string; grid_cell: string; severity_band: string; start_gid: string; end_gid: string; related_directed_links: number; otp_60_length_ratio: number|null; details?: Record<string,string|number|null>; contains_add?: boolean|null; municipalities?: Array<{number:string;name:string}> };
 type Cluster = { cluster_id:string; directed_cases:number; add_cases:number; no_add_cases:number; max_saved_m:number; case_ids:string[] }; 
 type Review = { decision: string; reason: string; comment: string; reviewer: string };
 type Data = { cases: Case[]; gkm: FeatureCollection; otp: FeatureCollection; add?: FeatureCollection; stop_points?: FeatureCollection; category_counts?: Record<string,number> };
@@ -40,6 +48,18 @@ function exportCsv(cases: Case[], reviews: Record<string,Review>) {
   const blob = new Blob(['\\uFEFF'+lines.join('\\r\\n')],{type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href=url; link.download='walk_review_decisions.csv'; link.click(); URL.revokeObjectURL(url);
 }
+const startSymbolSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="10" fill="#15803d" stroke="white" stroke-width="2"/>
+  <path d="M7.5 5.5 L18.5 12 L7.5 18.5 Z" fill="white"/>
+</svg>`;
+const startSymbolUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(startSymbolSvg)}`;
+
+function StartSymbol() {
+  return <svg viewBox="0 0 24 24" width="100%" height="100%" aria-hidden="true" focusable="false">
+    <path d="M7.5 5.5 L18.5 12 L7.5 18.5 Z" fill="currentColor"/>
+  </svg>;
+}
+
 export default function App() {
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<OLMap|null>(null);
@@ -52,7 +72,7 @@ export default function App() {
   const gkmSource = useRef(new VectorSource()); const otpSource = useRef(new VectorSource()); const addSource = useRef(new VectorSource()); const stopSource = useRef(new VectorSource());
   const selectedRef = useRef(''); const clusterModeRef = useRef(false);
   const popupNode = useRef<HTMLDivElement>(null);
-  const [pointInfo,setPointInfo] = useState<{id:string;role:string}|null>(null);
+  const [pointInfo,setPointInfo] = useState<{id:string;role:string;name:string;stop_area_number:string;designation:string;source:string}|null>(null);
   const [inspected,setInspected] = useState<'stop'|'gkm'|'otp'|null>(null);
   const [clusters,setClusters] = useState<Cluster[]>([]); const [clusterId,setClusterId] = useState(''); const [showClusterAll,setShowClusterAll] = useState(true);
   const [reviewPanelOpen,setReviewPanelOpen] = useState(true); const [data,setData] = useState<Data|null>(null); const [error,setError] = useState('');
@@ -97,8 +117,18 @@ export default function App() {
       new VectorLayer({source:stopSource.current,style:feature=>{
         const start=feature.get('role')==='start';
         const active=!clusterModeRef.current||feature.get('case_id')===selectedRef.current;
-        return new Style({image:new CircleStyle({radius:active?11:3,fill:new Fill({color:active?(start?'#15803d':'#b91c1c'):'rgba(100,116,139,0.35)'}),stroke:new Stroke({color:active?'#fff':'rgba(100,116,139,0.35)',width:active?2:1})}),
-          text:active?new Text({text:start?'A':'B',font:'bold 12px sans-serif',fill:new Fill({color:'#fff'})}):undefined});
+        return new Style({
+          image: active && start
+            ? new Icon({src:startSymbolUrl,anchor:[0.5,0.5],scale:1})
+            : new CircleStyle({
+                radius:active?11:3,
+                fill:new Fill({color:active?'#b91c1c':'rgba(100,116,139,0.35)'}),
+                stroke:new Stroke({color:active?'#fff':'rgba(100,116,139,0.35)',width:active?2:1})
+              }),
+          text:active && !start
+            ? new Text({text:'⚑',font:'bold 13px sans-serif',fill:new Fill({color:'#fff'})})
+            : undefined
+        });
       }})
     ],overlays:[popup],view:new View({center:[1300000,8100000],zoom:5}),controls:defaultControls()});
     map.on('singleclick',event=>{
@@ -106,13 +136,21 @@ export default function App() {
       map.forEachFeatureAtPixel(event.pixel,(feature,layer)=>{if(layer?.getSource()===stopSource.current)hits.push({feature,kind:'stop'});else if(layer?.getSource()===gkmSource.current)hits.push({feature,kind:'gkm'});else if(layer?.getSource()===otpSource.current)hits.push({feature,kind:'otp'});},{hitTolerance:8});
       const feature=hits[0]?.kind==='stop'?hits[0].feature:null;
       setInspected(hits[0]?.kind??null);
-      if(feature){setPointInfo({id:String(feature.get('stop_point_id')),role:feature.get('role')==='start'?'Startpunkt A':'Slutpunkt B'});popup.setPosition(event.coordinate);}
+      if(feature){setPointInfo({id:String(feature.get('stop_point_id')),role:feature.get('role')==='start'?'Startpunkt':'Slutpunkt',name:String(feature.get('stop_point_name')??''),stop_area_number:String(feature.get('stop_area_number')??''),designation:String(feature.get('designation')??''),source:String(feature.get('information_source')??'')});popup.setPosition(event.coordinate);}
       else{setPointInfo(null);popup.setPosition(undefined);}
     });
     mapRef.current=map;return ()=>{map.setTarget(undefined);mapRef.current=null;};
   },[]);
   useEffect(()=>{
-    if(!data||!selected||!mapRef.current)return;
+    if(!data||!mapRef.current)return;
+    if(!selected){
+      for(const source of [gkmSource.current,otpSource.current,addSource.current,stopSource.current]){
+        source.clear();
+      }
+      setPointInfo(null);
+      mapRef.current.getOverlays().item(0)?.setPosition(undefined);
+      return;
+    }
     const format = new GeoJSON();
     const activeIds = clusterId&&showClusterAll ? new Set(clusters.find(c=>c.cluster_id===clusterId)?.case_ids??[]) : new Set([selected]);
     const load=(collection:FeatureCollection,source:VectorSource,visible:boolean)=>{
@@ -180,10 +218,60 @@ export default function App() {
   const classifyCase=(c:Case)=>{if(comparisonMode==='distance')return c.severity_band;if(c.severity_band==='NOT_ELIGIBLE'||c.severity_band==='NO_ROUTE')return c.severity_band;const g=metricForRaw(c.details?.duration_seconds),o=metricForRaw(c.details?.otp_duration_s);if(g===null||o===null||g<=0||o<=0)return 'OTHER';const ratio=o/g;return ratio<.5?'VERY_SHORT':ratio<.75?'MODERATELY_SHORT':ratio<.9?'SLIGHTLY_SHORT':ratio<=1.1?'SIMILAR':'LONGER';};
   const categoryLabel=(value:string)=>{const labels:Record<string,string>={SIMILAR:'Likvärdig tid (±10 %)',SLIGHTLY_SHORT:'OTP 10–25 % snabbare',MODERATELY_SHORT:'OTP 25–50 % snabbare',VERY_SHORT:'OTP över 50 % snabbare',LONGER:'OTP över 10 % långsammare',OTHER:'Övriga/ej tidsjämförbara'};return comparisonMode==='time'?(labels[value]??categoryOptions.find(o=>o.value===value)?.label??value):(categoryOptions.find(o=>o.value===value)?.label??value);};
   const municipalities=useMemo(()=>{const m=new globalThis.Map<string,string>();for(const c of data?.cases??[])for(const v of c.municipalities??[])m.set(v.number,v.name);return [...m].sort((a,b)=>a[1].localeCompare(b[1],'sv'));},[data]);
-  const municipalityCounts=useMemo(()=>{const result:Record<string,number>={};for(const c of data?.cases??[]){if((filter!=='ALL'&&classifyCase(c)!==filter)||!addMatches(c)||!qualityMatches(c)||!lengthMatches(c)||(comparableOnly&&!isComparable(c)))continue;const ids=c.municipalities?.map(m=>m.number)??[];for(const id of new Set(ids.length?ids:['UNKNOWN']))result[id]=(result[id]??0)+1;}return result;},[data,filter,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly]);
-  const municipalityMatches=(c:Case)=>(!municipalitiesSelected.length||municipalitiesSelected.some(number=>number==='UNKNOWN'?!(c.municipalities?.length):c.municipalities?.some(m=>m.number===number)));
   const clusterIds=useMemo(()=>new Set(clusters.find(c=>c.cluster_id===clusterId)?.case_ids??[]),[clusters,clusterId]);
+  const municipalityCounts=useMemo(()=>{
+    const result:Record<string,number>={};
+    const query=caseQuery.trim().toLocaleLowerCase("sv");
+    for(const c of data?.cases??[]){
+      if(
+        (clusterId&&!clusterIds.has(c.case_id))||
+        (filter!=='ALL'&&classifyCase(c)!==filter)||
+        !addMatches(c)||
+        !qualityMatches(c)||
+        !lengthMatches(c)||
+        (comparableOnly&&!isComparable(c))||
+        (query&&![c.start_gid,c.end_gid,c.case_id].some(v=>
+          String(v??"").toLocaleLowerCase("sv").includes(query)
+        ))
+      )continue;
+      const ids=c.municipalities?.map(m=>m.number)??[];
+      for(const id of new Set(ids.length?ids:['UNKNOWN'])){
+        result[id]=(result[id]??0)+1;
+      }
+    }
+    return result;
+  },[data,filter,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery]);
+  const municipalityMatches=(c:Case)=>(!municipalitiesSelected.length||municipalitiesSelected.some(number=>number==='UNKNOWN'?!(c.municipalities?.length):c.municipalities?.some(m=>m.number===number)));
+  const clusterMatchCounts=useMemo(()=>{
+    const matchingIds=new Set(
+      (data?.cases??[])
+        .filter(c=>
+          municipalityMatches(c)&&
+          addMatches(c)&&
+          qualityMatches(c)&&
+          lengthMatches(c)&&
+          (!comparableOnly||isComparable(c))&&
+          (filter==='ALL'||classifyCase(c)===filter)&&
+          (!caseQuery.trim()||
+            [c.start_gid,c.end_gid,c.case_id].some(v=>
+              String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv"))
+            ))
+        )
+        .map(c=>c.case_id)
+    );
+    return Object.fromEntries(
+      clusters.map(cluster=>[
+        cluster.cluster_id,
+        cluster.case_ids.filter(id=>matchingIds.has(id)).length
+      ])
+    ) as Record<string,number>;
+  },[data,clusters,filter,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery]);
   const cases=useMemo(()=>data?.cases.filter(c=>(!clusterId||clusterIds.has(c.case_id))&&municipalityMatches(c)&&addMatches(c)&&qualityMatches(c)&&lengthMatches(c)&&(!comparableOnly||isComparable(c))&&(filter==='ALL'||classifyCase(c)===filter)&&(!caseQuery.trim()||[c.start_gid,c.end_gid,c.case_id].some(v=>String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv")))))??[],[data,filter,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery]);
+  useEffect(()=>{
+    if(!data)return;
+    if(cases.some(c=>c.case_id===selected))return;
+    setSelected(cases[0]?.case_id??"");
+  },[data,cases,selected]);
   const searchMatchCount=useMemo(()=>{
     const query=caseQuery.trim().toLocaleLowerCase("sv");
     if(!query)return 0;
@@ -193,7 +281,21 @@ export default function App() {
       )
     ).length??0;
   },[data,caseQuery]);
-  const counts=useMemo(()=>Object.fromEntries(categoryOptions.map(option=>[option.value,data?.cases.filter(c=>((!municipalitiesSelected.length||municipalitiesSelected.some(number=>number==='UNKNOWN'?!(c.municipalities?.length):c.municipalities?.some(m=>m.number===number))))&&addMatches(c)&&qualityMatches(c)&&lengthMatches(c)&&(!comparableOnly||isComparable(c))&&(option.value==='ALL'||classifyCase(c)===option.value)).length??0])),[data,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly]);
+  const counts=useMemo(()=>Object.fromEntries(categoryOptions.map(option=>[
+    option.value,
+    data?.cases.filter(c=>
+      (!clusterId||clusterIds.has(c.case_id))&&
+      municipalityMatches(c)&&
+      addMatches(c)&&
+      qualityMatches(c)&&
+      lengthMatches(c)&&
+      (!comparableOnly||isComparable(c))&&
+      (option.value==='ALL'||classifyCase(c)===option.value)&&
+      (!caseQuery.trim()||[c.start_gid,c.end_gid,c.case_id].some(v=>
+        String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv"))
+      ))
+    ).length??0
+  ])),[data,clusterId,clusterIds,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery]);
   type OverviewSelection = {
     quality?: string;
     municipality?: string;
@@ -263,7 +365,7 @@ export default function App() {
     setActiveView("map");
     requestAnimationFrame(()=>mapRef.current?.updateSize());
   };
-  useEffect(()=>{if(cases.length&&!cases.some(c=>c.case_id===selected))setSelected(cases[0].case_id);},[cases,selected]);
+
   const reviewed=Object.values(reviews).filter(r=>r.decision).length;
   const [tab,setTab]=useState<'information'|'comparison'|'review'>('information');
   const selectedGeometry=inspected==='gkm'?data?.gkm:inspected==='otp'?data?.otp:null;
@@ -428,6 +530,11 @@ export default function App() {
     const openMunicipality = (number:string,quality:string="ALL") =>
       openOverviewSelection({municipality:number,quality});
     return <>
+      <p className="overview-note">
+        Översikten visar statistik för hela analysunderlaget.
+        Klicka på ett nyckeltal, en kategori eller ett tabellvärde för att öppna
+        motsvarande sträckor i kartvyn. Tidigare filter ersätts av det nya urvalet.
+      </p>
       <div className="overview-kpis">
         <button type="button" className="overview-kpi overview-clickable" onClick={()=>openOverviewSelection()}><span>Alla gånglänkar</span><strong>{fmt(total)}</strong><small>Riktade GKM-länkar</small></button>
         <button type="button" className="overview-kpi overview-clickable" onClick={()=>openOverviewSelection({comparable:true})}><span>Jämförbar geometri</span><strong>{fmt(comparable)}</strong><small>{pct(comparable,total)} av samtliga</small></button>
@@ -642,6 +749,7 @@ export default function App() {
       setCaseQuery(query);
     }}>Rensa övriga filter</button>
   </div>}
+
 <details className="sidebar-filters">
   <summary>Filter och urval
     {activeFilterCount>0&&<span className="active-filter-count">({activeFilterCount})</span>}
@@ -694,7 +802,27 @@ export default function App() {
         </div>
         <small>{cases.length.toLocaleString("sv-SE")} matchande sträckor</small>
       </div>}
-<label htmlFor="cluster-select">Granskningskluster</label><select id="cluster-select" value={clusterId} disabled={!clusters.length} onChange={e=>{setClusterId(e.target.value);setFilter('ALL');setAddFilter('all');setMunicipalitiesSelected([]);setVisibleLimit(150);const first=clusters.find(c=>c.cluster_id===e.target.value)?.case_ids[0];if(first)setSelected(first);}}><option value="">Alla gånglänkar</option>{clusters.map(c=><option key={c.cluster_id} value={c.cluster_id}>{c.cluster_id} · {c.directed_cases} fall · {c.add_cases} ADD · max {c.max_saved_m} m</option>)}</select>{clusterId&&<label><input type="checkbox" checked={showClusterAll} onChange={e=>setShowClusterAll(e.target.checked)}/> Visa hela klustret på kartan</label>}{!clusters.length&&<p className="hint">Klusterfil saknas. Kör analysskriptet för kluster igen.</p>}<label htmlFor="add-filter">ADD-länk i GKM-sträckan</label><select id="add-filter" value={addFilter} disabled={!hasAddData} onChange={e=>setAddFilter(e.target.value as "all"|"yes"|"no")}><option value="all">Alla</option><option value="yes">Ja</option><option value="no">Nej</option><option value="unknown">Okänd, GKM-geometri saknas</option></select>{!hasAddData&&<p className="hint">ADD-klassning saknas i exporten. Filtret aktiveras när underlaget kompletterats.</p>}<label htmlFor="municipality-search">Kommuner {municipalitiesSelected.length?(`(${municipalitiesSelected.length} valda)`):'(alla)'}</label><input id="municipality-search" type="search" placeholder="Sök kommun…" value={municipalityQuery} onChange={e=>setMunicipalityQuery(e.target.value)}/><div className="municipality-actions"><button type="button" onClick={()=>setMunicipalitiesSelected([])}>Alla kommuner</button><button type="button" onClick={()=>setMunicipalitiesSelected(municipalities.filter(([,name])=>name.toLocaleLowerCase('sv').includes(municipalityQuery.toLocaleLowerCase('sv'))).map(([number])=>number))}>Välj visade</button></div><div className="municipality-options" role="group" aria-label="Välj kommuner">{municipalities.filter(([,name])=>name.toLocaleLowerCase('sv').includes(municipalityQuery.toLocaleLowerCase('sv'))).map(([number,name])=><label key={number}><input type="checkbox" checked={municipalitiesSelected.includes(number)} onChange={e=>setMunicipalitiesSelected(prev=>e.target.checked?[...prev,number]:prev.filter(x=>x!==number))}/>{name} ({municipalityCounts[number]??0})</label>)}{(!municipalityQuery||'okänd kommun'.includes(municipalityQuery.toLocaleLowerCase('sv')))&&<label><input type="checkbox" checked={municipalitiesSelected.includes('UNKNOWN')} onChange={e=>setMunicipalitiesSelected(prev=>e.target.checked?[...prev,'UNKNOWN']:prev.filter(x=>x!=='UNKNOWN'))}/>Okänd kommun ({municipalityCounts.UNKNOWN??0})</label>}</div><label><input type="checkbox" checked={comparableOnly}
+
+<label htmlFor="cluster-select">Granskningskluster</label><select id="cluster-select" value={clusterId} disabled={!clusters.length} onChange={e=>{
+  setClusterId(e.target.value);
+  setVisibleLimit(150);
+  const nextCluster=clusters.find(c=>c.cluster_id===e.target.value);
+  const nextIds=nextCluster?new Set(nextCluster.case_ids):null;
+  const query=caseQuery.trim().toLocaleLowerCase("sv");
+  const first=data?.cases.find(c=>
+    (!nextIds||nextIds.has(c.case_id))&&
+    municipalityMatches(c)&&
+    addMatches(c)&&
+    qualityMatches(c)&&
+    lengthMatches(c)&&
+    (!comparableOnly||isComparable(c))&&
+    (filter==='ALL'||classifyCase(c)===filter)&&
+    (!query||[c.start_gid,c.end_gid,c.case_id].some(v=>
+      String(v??"").toLocaleLowerCase("sv").includes(query)
+    ))
+  );
+  setSelected(first?.case_id??"");
+}}><option value="">Alla gånglänkar</option>{clusters.map(c=><option key={c.cluster_id} value={c.cluster_id}>{c.cluster_id} · {clusterMatchCounts[c.cluster_id]??0} av {c.directed_cases} matchar · {c.add_cases} ADD · max {c.max_saved_m} m</option>)}</select>{clusterId&&<label><input type="checkbox" checked={showClusterAll} onChange={e=>setShowClusterAll(e.target.checked)}/> Visa hela klustret på kartan</label>}{clusterId&&showClusterAll&&<p className="hint" role="status">Kartan visar hela klustret ({clusters.find(c=>c.cluster_id===clusterId)?.directed_cases??0} sträckor). Av dessa matchar {clusterMatchCounts[clusterId]??0} de övriga filtren. Resultatlistan visar endast matchande sträckor.</p>}{!clusters.length&&<p className="hint">Klusterfil saknas. Kör analysskriptet för kluster igen.</p>}<label htmlFor="add-filter">ADD-länk i GKM-sträckan</label><select id="add-filter" value={addFilter} disabled={!hasAddData} onChange={e=>setAddFilter(e.target.value as "all"|"yes"|"no")}><option value="all">Alla</option><option value="yes">Ja</option><option value="no">Nej</option><option value="unknown">Okänd, GKM-geometri saknas</option></select>{!hasAddData&&<p className="hint">ADD-klassning saknas i exporten. Filtret aktiveras när underlaget kompletterats.</p>}<label htmlFor="municipality-search">Kommuner {municipalitiesSelected.length?(`(${municipalitiesSelected.length} valda)`):'(alla)'}</label><input id="municipality-search" type="search" placeholder="Sök kommun…" value={municipalityQuery} onChange={e=>setMunicipalityQuery(e.target.value)}/><div className="municipality-actions"><button type="button" onClick={()=>setMunicipalitiesSelected([])}>Alla kommuner</button><button type="button" onClick={()=>setMunicipalitiesSelected(municipalities.filter(([,name])=>name.toLocaleLowerCase('sv').includes(municipalityQuery.toLocaleLowerCase('sv'))).map(([number])=>number))}>Välj visade</button></div><div className="municipality-options" role="group" aria-label="Välj kommuner">{municipalities.filter(([,name])=>name.toLocaleLowerCase('sv').includes(municipalityQuery.toLocaleLowerCase('sv'))).map(([number,name])=><label key={number}><input type="checkbox" checked={municipalitiesSelected.includes(number)} onChange={e=>setMunicipalitiesSelected(prev=>e.target.checked?[...prev,number]:prev.filter(x=>x!==number))}/>{name} ({municipalityCounts[number]??0})</label>)}{(!municipalityQuery||'okänd kommun'.includes(municipalityQuery.toLocaleLowerCase('sv')))&&<label><input type="checkbox" checked={municipalitiesSelected.includes('UNKNOWN')} onChange={e=>setMunicipalitiesSelected(prev=>e.target.checked?[...prev,'UNKNOWN']:prev.filter(x=>x!=='UNKNOWN'))}/>Okänd kommun ({municipalityCounts.UNKNOWN??0})</label>}</div><label><input type="checkbox" checked={comparableOnly}
       onChange={e=>{setComparableOnly(e.target.checked);setVisibleLimit(150);}}/>
       Endast geometriskt jämförbara</label>
     <label htmlFor="length-range-filter">Längdkvot OTP/GKM</label>
@@ -707,13 +835,13 @@ export default function App() {
       Aktivt längdurval: {lengthRanges[lengthRange].label}.
       <button type="button" onClick={()=>{setLengthRange(null);setVisibleLimit(150);}}> Rensa längdurval</button>
     </p>}
-    <label htmlFor="quality-filter">Geometrisk överensstämmelse GKM–OTP</label><select id="quality-filter" value={qualityFilter} onChange={e=>{setQualityFilter(e.target.value);setVisibleLimit(150);}}>{qualityOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select><p className="hint">Låg överensstämmelse betyder att OTP:s vägval skiljer sig från GKM, inte att GKM är fel.</p><label htmlFor="severity">Visa fall</label><select id="severity" value={filter} onChange={e=>{const value=e.target.value;setFilter(value);setVisibleLimit(150);const first=data?.cases.find(c=>municipalityMatches(c)&&addMatches(c)&&(value==="ALL"||classifyCase(c)===value));setSelected(first?.case_id??"");}}>{categoryOptions.map(option=><option key={option.value} value={option.value}>{categoryLabel(option.value)} ({counts[option.value]??0})</option>)}</select><div className="filter-counts">{categoryOptions.map(option=><button key={option.value} type="button" className={"filter-count "+(filter===option.value?"active":"")} onClick={()=>{setFilter(option.value);setVisibleLimit(150);const first=data?.cases.find(c=>municipalityMatches(c)&&addMatches(c)&&(option.value==="ALL"||classifyCase(c)===option.value));setSelected(first?.case_id??"");}}><span>{categoryLabel(option.value)}</span><strong>{(counts[option.value]??0).toLocaleString("sv-SE")}</strong></button>)}</div></div></details><div className="case-list">{!data?.category_counts&&<p className="hint">Visar endast granskningsurvalet. Kör exporten för alla gånglänkar för korrekta totaler.</p>}{cases.slice(0,visibleLimit).map(c=><div key={c.case_id} className={'case '+(c.case_id===selected?'active':'')}><div className="case-select" role="button" tabIndex={0} onClick={()=>setSelected(c.case_id)} onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==="Enter"||e.key===" ")){e.preventDefault();setSelected(c.case_id);}}}><span className="case-endpoint-row"><span className="case-endpoint-value" title={String(c.start_gid)}>{c.start_gid}</span><button type="button" className="case-copy-icon" title={`Kopiera Start-GID: ${c.start_gid}`} aria-label={`Kopiera Start-GID: ${c.start_gid}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.start_gid));setCopiedId(`${c.case_id}:Start-GID`);}catch{window.prompt("Kopiera ID:",String(c.start_gid));}}}>{copiedId===`${c.case_id}:Start-GID`?"✓":"⧉"}</button><span className="case-arrow">→</span><span className="case-endpoint-value" title={String(c.end_gid)}>{c.end_gid}</span><button type="button" className="case-copy-icon" title={`Kopiera Slut-GID: ${c.end_gid}`} aria-label={`Kopiera Slut-GID: ${c.end_gid}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.end_gid));setCopiedId(`${c.case_id}:Slut-GID`);}catch{window.prompt("Kopiera ID:",String(c.end_gid));}}}>{copiedId===`${c.case_id}:Slut-GID`?"✓":"⧉"}</button></span><span className="case-municipality">{c.municipalities?.map(m=>m.name).join(", ")||"Okänd kommun"}</span><span className="case-quality">{qualityLabel(c.quality_category)}</span><span className="case-distances">GKM {metricFor(c,comparisonMode==="distance"?"gkm_distance_m":"duration_seconds")?.toLocaleString("sv-SE",{maximumFractionDigits:1})??"–"} {comparisonMode==="distance"?"m":"s"} · OTP {metricFor(c,comparisonMode==="distance"?"otp_distance_m":"otp_duration_s")?.toLocaleString("sv-SE",{maximumFractionDigits:1})??"–"} {comparisonMode==="distance"?"m":"s"}</span><span className="case-comparison">{comparisonFor(c)}</span><span className="case-id-row"><small className="case-id" title={c.case_id}>{c.case_id}</small><button type="button" className="case-copy-icon" title={`Kopiera Case-ID: ${c.case_id}`} aria-label={`Kopiera Case-ID: ${c.case_id}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.case_id));setCopiedId(`${c.case_id}:Case-ID`);}catch{window.prompt("Kopiera ID:",String(c.case_id));}}}>{copiedId===`${c.case_id}:Case-ID`?"✓":"⧉"}</button></span>{reviews[c.case_id]?.decision&&<span className="done">Bedömd</span>}</div></div>)}{cases.length>visibleLimit&&<button className="case" onClick={()=>setVisibleLimit(n=>n+150)}>Visa fler ({(cases.length-visibleLimit).toLocaleString("sv-SE")} återstår)</button>}</div></div></aside><section className="map-panel"><div ref={mapNode} className="map"/>
+    <label htmlFor="quality-filter">Geometrisk överensstämmelse GKM–OTP</label><select id="quality-filter" value={qualityFilter} onChange={e=>{setQualityFilter(e.target.value);setVisibleLimit(150);}}>{qualityOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select><p className="hint">Låg överensstämmelse betyder att OTP:s vägval skiljer sig från GKM, inte att GKM är fel.</p><label htmlFor="severity">Visa fall</label><select id="severity" value={filter} onChange={e=>{const value=e.target.value;setFilter(value);setVisibleLimit(150);const first=data?.cases.find(c=>municipalityMatches(c)&&addMatches(c)&&(value==="ALL"||classifyCase(c)===value));setSelected(first?.case_id??"");}}>{categoryOptions.map(option=><option key={option.value} value={option.value}>{categoryLabel(option.value)} ({counts[option.value]??0})</option>)}</select><div className="filter-counts">{categoryOptions.map(option=><button key={option.value} type="button" className={"filter-count "+(filter===option.value?"active":"")} onClick={()=>{setFilter(option.value);setVisibleLimit(150);const first=data?.cases.find(c=>municipalityMatches(c)&&addMatches(c)&&(option.value==="ALL"||classifyCase(c)===option.value));setSelected(first?.case_id??"");}}><span>{categoryLabel(option.value)}</span><strong>{(counts[option.value]??0).toLocaleString("sv-SE")}</strong></button>)}</div></div></details><div className="case-list">{!data?.category_counts&&<p className="hint">Visar endast granskningsurvalet. Kör exporten för alla gånglänkar för korrekta totaler.</p>}{cases.slice(0,visibleLimit).map(c=><div key={c.case_id} className={'case '+(c.case_id===selected?'active':'')}><div className="case-select" role="button" tabIndex={0} onClick={()=>setSelected(c.case_id)} onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==="Enter"||e.key===" ")){e.preventDefault();setSelected(c.case_id);}}}><span className="case-endpoint-row" style={{alignItems:'flex-start',gap:8}}><span className="case-endpoint-marker start" title="Startpunkt" aria-label="Startpunkt"><StartSymbol /></span><span style={{flex:'1 1 auto',minWidth:0,display:'flex',flexDirection:'column',gap:2}}><strong style={{fontSize:12,lineHeight:1.35,overflowWrap:'anywhere'}} title={stopLabel(c.start_stop_point,c.start_gid)}>{c.start_stop_point?.name || `start_gid ${c.start_gid}`}</strong><span style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap',fontSize:11,lineHeight:1.3,color:'#475467'}}><span>{c.start_stop_point?.number || 'Nummer saknas'}{c.start_stop_point?.designation ? ` · läge ${c.start_stop_point.designation}` : ''}{stopSourceLabel(c.start_stop_point) ? ` · ${stopSourceLabel(c.start_stop_point)}` : ''}</span>{c.start_stop_point?.number && <button type="button" className="case-copy-icon" style={{fontSize:11,padding:'1px 4px',border:'1px solid #d0d5dd',borderRadius:4}} aria-label="Kopiera hållplatsnummer" title={`Kopiera hållplatsnummer: ${c.start_stop_point.number}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.start_stop_point?.number));setCopiedId(`${c.case_id}:start-nummer`);}catch{window.prompt('Kopiera hållplatsnummer:',String(c.start_stop_point?.number));}}}>{copiedId===`${c.case_id}:start-nummer`?'✓':'⧉'} nr</button>}<button type="button" className="case-copy-icon" style={{fontSize:11,padding:'1px 4px',border:'1px solid #d0d5dd',borderRadius:4}} aria-label="Kopiera start-GID" title={`Kopiera start-GID: ${c.start_gid}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.start_gid));setCopiedId(`${c.case_id}:start_gidKEY`);}catch{window.prompt('Kopiera GID:',String(c.start_gid));}}}>{copiedId===`${c.case_id}:start_gidKEY`?'✓':'⧉'} GID</button></span></span></span><span className="case-endpoint-row" style={{alignItems:'flex-start',gap:8}}><span className="case-endpoint-marker end" title="Slutpunkt" aria-label="Slutpunkt">⚑</span><span style={{flex:'1 1 auto',minWidth:0,display:'flex',flexDirection:'column',gap:2}}><strong style={{fontSize:12,lineHeight:1.35,overflowWrap:'anywhere'}} title={stopLabel(c.end_stop_point,c.end_gid)}>{c.end_stop_point?.name || `end_gid ${c.end_gid}`}</strong><span style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap',fontSize:11,lineHeight:1.3,color:'#475467'}}><span>{c.end_stop_point?.number || 'Nummer saknas'}{c.end_stop_point?.designation ? ` · läge ${c.end_stop_point.designation}` : ''}{stopSourceLabel(c.end_stop_point) ? ` · ${stopSourceLabel(c.end_stop_point)}` : ''}</span>{c.end_stop_point?.number && <button type="button" className="case-copy-icon" style={{fontSize:11,padding:'1px 4px',border:'1px solid #d0d5dd',borderRadius:4}} aria-label="Kopiera hållplatsnummer" title={`Kopiera hållplatsnummer: ${c.end_stop_point.number}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.end_stop_point?.number));setCopiedId(`${c.case_id}:end-nummer`);}catch{window.prompt('Kopiera hållplatsnummer:',String(c.end_stop_point?.number));}}}>{copiedId===`${c.case_id}:end-nummer`?'✓':'⧉'} nr</button>}<button type="button" className="case-copy-icon" style={{fontSize:11,padding:'1px 4px',border:'1px solid #d0d5dd',borderRadius:4}} aria-label="Kopiera end-GID" title={`Kopiera end-GID: ${c.end_gid}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.end_gid));setCopiedId(`${c.case_id}:end_gidKEY`);}catch{window.prompt('Kopiera GID:',String(c.end_gid));}}}>{copiedId===`${c.case_id}:end_gidKEY`?'✓':'⧉'} GID</button></span></span></span><span className="case-municipality">{c.municipalities?.map(m=>m.name).join(", ")||"Okänd kommun"}</span><span className="case-quality">{qualityLabel(c.quality_category)}</span><span className="case-distances">GKM {metricFor(c,comparisonMode==="distance"?"gkm_distance_m":"duration_seconds")?.toLocaleString("sv-SE",{maximumFractionDigits:1})??"–"} {comparisonMode==="distance"?"m":"s"} · OTP {metricFor(c,comparisonMode==="distance"?"otp_distance_m":"otp_duration_s")?.toLocaleString("sv-SE",{maximumFractionDigits:1})??"–"} {comparisonMode==="distance"?"m":"s"}</span><span className="case-comparison">{comparisonFor(c)}</span><span className="case-id-row"><small className="case-id" title={c.case_id}>{c.case_id}</small><button type="button" className="case-copy-icon" title={`Kopiera Case-ID: ${c.case_id}`} aria-label={`Kopiera Case-ID: ${c.case_id}`} onClick={async(e)=>{e.stopPropagation();try{await navigator.clipboard.writeText(String(c.case_id));setCopiedId(`${c.case_id}:Case-ID`);}catch{window.prompt("Kopiera ID:",String(c.case_id));}}}>{copiedId===`${c.case_id}:Case-ID`?"✓":"⧉"}</button></span>{reviews[c.case_id]?.decision&&<span className="done">Bedömd</span>}</div></div>)}{cases.length>visibleLimit&&<button className="case" onClick={()=>setVisibleLimit(n=>n+150)}>Visa fler ({(cases.length-visibleLimit).toLocaleString("sv-SE")} återstår)</button>}</div></div></aside><section className="map-panel"><div ref={mapNode} className="map"/>
 <details className="map-key" aria-label="Karta och lager" open>
   <summary>Karta och lager</summary>
   <label className="map-key-layer"><input type="checkbox" checked={showGkm} onChange={e=>setShowGkm(e.target.checked)}/><span className="map-key-line gkm"/>GKM-gånglänk</label>
   <label className="map-key-layer"><input type="checkbox" checked={showOtp} onChange={e=>setShowOtp(e.target.checked)}/><span className="map-key-line otp"/>OTP-rutt</label>
   <label className="map-key-layer"><input type="checkbox" checked={showAdd} disabled={!data?.add} onChange={e=>setShowAdd(e.target.checked)}/><span className={`map-key-line ${addGeometryMode==="source"?"add-source":"add-overlap"}`}/>ADD-geometri</label>
-  <label className="map-key-layer"><input type="checkbox" checked={showPoints} onChange={e=>setShowPoints(e.target.checked)}/><span className="map-key-point start">A</span><span className="map-key-point end">B</span>Start/slutpunkt</label>
+  <label className="map-key-layer"><input type="checkbox" checked={showPoints} onChange={e=>setShowPoints(e.target.checked)}/><span className="map-key-point start" title="Startpunkt"><StartSymbol /></span><span className="map-key-point end" title="Slutpunkt">⚑</span>Startpunkt / slutpunkt</label>
   <details className="map-key-settings">
     <summary>Fler kartinställningar</summary>
     <label>Bakgrundskarta
@@ -735,14 +863,12 @@ export default function App() {
         {(addGeometryMode==="source"||addGeometryMode==="both")&&<div><span className="map-key-line add-source"/>Hela ADD-objekt</div>}
       </div>}
   </details>
-</details><div ref={popupNode} className="point-popup">{pointInfo&&<><strong>{pointInfo.role}</strong><div>StopPoint-ID: {pointInfo.id}</div><small>Position från OTP:s analysunderlag</small></>}</div>{error&&<div className="notice">{error}</div>}</section>{!reviewPanelOpen&&<button type="button" className="review-open-button" onClick={()=>setReviewPanelOpen(true)} aria-label="Visa detaljpanelen">← Visa detaljer</button>}<aside className="review" hidden={!reviewPanelOpen}><div className="review-heading"><div className="eyebrow">Granskning</div><button type="button" className="review-close-button" onClick={()=>setReviewPanelOpen(false)} aria-label="Dölj detaljpanelen" title="Dölj detaljpanelen">✕</button></div><div className="review-tabs" role="tablist" aria-label="Detaljpanel"><button role="tab" aria-selected={tab==="information"} className={tab==="information"?"active":""} onClick={()=>setTab("information")}>Information</button><button role="tab" aria-selected={tab==="comparison"} className={tab==="comparison"?"active":""} onClick={()=>setTab("comparison")}>Jämförelse</button><button role="tab" aria-selected={tab==="review"} className={tab==="review"?"active":""} onClick={()=>setTab("review")}>Bedömning</button></div>{tab==="information"&&<div><h2>{inspected==="stop"?"Hållplatsläge":inspected==="gkm"?"GKM-gånglänk":inspected==="otp"?"OTP-rutt":"Klicka på kartan"}</h2>{inspected==="stop"&&<>{detail("GID",pointInfo?.id)}{detail("Roll",pointInfo?.role)}<p className="hint">Namn, läge och giltighet kräver kompletterad export från GWS.</p></>}{(inspected==="gkm"||inspected==="otp")&&<>{detail("Från GID",selectedCase?.start_gid)}{detail("Till GID",selectedCase?.end_gid)}{Object.entries(selectedProperties??{}).filter(([key])=>key!=="case_id").map(([key,value])=><div key={key}>{detail(key,value)}</div>)}<p className="hint">Hastighet, tid och giltighet behöver tillföras från källdata.</p></>}</div>}{tab==="comparison"&&<div><h2>Jämförelse</h2>{detail("Från GID",selectedCase?.start_gid)}{detail("Till GID",selectedCase?.end_gid)}{detail("GKM",metricFormat(gkmValue))}{detail("OTP",metricFormat(otpValue))}{detail("Skillnad (OTP − GKM)",metricDifference===null?'Ej tillgängligt':(metricDifference>0?'+':'')+metricFormat(metricDifference<0?-metricDifference:metricDifference)+(metricDifference<0?(comparisonMode==='time'?' snabbare':' kortare'):'')+(metricDifference>0?(comparisonMode==='time'?' långsammare':' längre'):''))}{detail("Skillnad i procent",metricPercent===null?'Ej tillgängligt':(metricPercent>0?'+':'')+metricPercent.toLocaleString('sv-SE',{maximumFractionDigits:1})+' %')}<h3>Geometrisk överensstämmelse</h3>
+</details><div ref={popupNode} className="point-popup">{pointInfo&&<><strong>{pointInfo.role}</strong><div>{pointInfo.name ? `${pointInfo.name}${pointInfo.stop_area_number ? ` (${pointInfo.stop_area_number})` : ""}${pointInfo.designation ? `, läge ${pointInfo.designation}` : ""}` : `GID ${pointInfo.id}`}</div><div>GID: {pointInfo.id}</div>{pointInfo.source==="historical"&&<small>Historisk uppgift</small>}{(pointInfo.source==="gid_only"||!pointInfo.name)&&<small>Ej identifierat</small>}<small>Position från OTP:s analysunderlag</small></>}</div>{error&&<div className="notice">{error}</div>}</section>{!reviewPanelOpen&&<button type="button" className="review-open-button" onClick={()=>setReviewPanelOpen(true)} aria-label="Visa detaljpanelen">← Visa detaljer</button>}<aside className="review" hidden={!reviewPanelOpen}><div className="review-heading"><div className="eyebrow">Granskning</div><button type="button" className="review-close-button" onClick={()=>setReviewPanelOpen(false)} aria-label="Dölj detaljpanelen" title="Dölj detaljpanelen">✕</button></div><div className="review-tabs" role="tablist" aria-label="Detaljpanel"><button role="tab" aria-selected={tab==="information"} className={tab==="information"?"active":""} onClick={()=>setTab("information")}>Information</button><button role="tab" aria-selected={tab==="comparison"} className={tab==="comparison"?"active":""} onClick={()=>setTab("comparison")}>Jämförelse</button><button role="tab" aria-selected={tab==="review"} className={tab==="review"?"active":""} onClick={()=>setTab("review")}>Bedömning</button></div>{tab==="information"&&<div><h2>{inspected==="stop"?"Hållplatsläge":inspected==="gkm"?"GKM-gånglänk":inspected==="otp"?"OTP-rutt":"Klicka på kartan"}</h2>{inspected==="stop"&&<>{detail("Hållplats",pointInfo?.name)}{detail("Hållplatsnummer",pointInfo?.stop_area_number)}{detail("Lägesbeteckning",pointInfo?.designation)}{detail("GID",pointInfo?.id)}{detail("Roll",pointInfo?.role)}{pointInfo?.source==="historical"&&<p className="hint">Historisk uppgift – innebär inte att läget är aktuellt.</p>}{(pointInfo?.source==="gid_only"||!pointInfo?.name)&&<p className="hint">Ej identifierat. Läget kan vara indraget.</p>}</>}{(inspected==="gkm"||inspected==="otp")&&<>{detail("Från GID",selectedCase?.start_gid)}{detail("Till GID",selectedCase?.end_gid)}{Object.entries(selectedProperties??{}).filter(([key])=>key!=="case_id").map(([key,value])=><div key={key}>{detail(key,value)}</div>)}<p className="hint">Hastighet, tid och giltighet behöver tillföras från källdata.</p></>}</div>}{tab==="comparison"&&<div><h2>Jämförelse</h2>{detail("Från GID",selectedCase?.start_gid)}{detail("Till GID",selectedCase?.end_gid)}{detail("GKM",metricFormat(gkmValue))}{detail("OTP",metricFormat(otpValue))}{detail("Skillnad (OTP − GKM)",metricDifference===null?'Ej tillgängligt':(metricDifference>0?'+':'')+metricFormat(metricDifference<0?-metricDifference:metricDifference)+(metricDifference<0?(comparisonMode==='time'?' snabbare':' kortare'):'')+(metricDifference>0?(comparisonMode==='time'?' långsammare':' längre'):''))}{detail("Skillnad i procent",metricPercent===null?'Ej tillgängligt':(metricPercent>0?'+':'')+metricPercent.toLocaleString('sv-SE',{maximumFractionDigits:1})+' %')}<h3>Geometrisk överensstämmelse</h3>
 {detail("Kvalitetskategori",qualityLabel(selectedCase?.quality_category))}
 {detail("Symmetrisk linjetäckning",qualityPercent("symmetric_line_coverage_pct"))}
 {detail("GKM nära OTP",qualityPercent("gkm_line_near_otp_pct"))}
 {detail("OTP nära GKM",qualityPercent("otp_line_near_gkm_pct"))}
 {detail("Hausdorffavstånd",qualityMeters("hausdorff_distance_m"))}
 <p className="hint">Geometrisk överensstämmelse mäts med 5 meters tolerans. Låg överensstämmelse visar avvikande vägval, inte fel i GKM.</p>
-{comparisonMode==='time'&&<p className="hint">Visar källornas rapporterade tider. Tiderna kan bygga på olika hastighetsmodeller.</p>}</div>}{tab==="review"&&<><h2>{selectedCase?.case_id??'Inget fall valt'}</h2>{selectedCase&&<><p>StopPoints: {selectedCase.start_gid} → {selectedCase.end_gid}</p><p>Skillnad OTP jämfört med GKM: <strong>{comparisonFor(selectedCase)}</strong>.</p><p className="hint">Kontrollera underlag, trappor, lutning, hinder och tillgänglighet. GKM:s ursprungliga motivering är inte dokumenterad.</p><label>Beslut<select value={review.decision} onChange={e=>update('decision',e.target.value)}><option value="">Välj bedömning</option>{decisions.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select></label><label>Orsak<select value={review.reason} onChange={e=>update('reason',e.target.value)}>{reasons.map(r=><option key={r} value={r}>{r||'Välj orsak'}</option>)}</select></label><label>Kommentar<textarea rows={5} value={review.comment} onChange={e=>update('comment',e.target.value)} placeholder="Vad motiverar bedömningen?"/></label><label>Granskare<input value={review.reviewer} onChange={e=>update('reviewer',e.target.value)} placeholder="Namn"/></label><p className="hint">Bedömningar finns endast i den här öppna sidan tills de exporteras. Exportera innan du stänger eller laddar om.</p></>}</>}</aside></main></div></div>;
+{comparisonMode==='time'&&<p className="hint">Visar källornas rapporterade tider. Tiderna kan bygga på olika hastighetsmodeller.</p>}</div>}{tab==="review"&&<><h2>{selectedCase?.case_id??'Inget fall valt'}</h2>{selectedCase&&<><p>StopPoints: {stopLabel(selectedCase.start_stop_point,selectedCase.start_gid)} → {stopLabel(selectedCase.end_stop_point,selectedCase.end_gid)}</p><p>Skillnad OTP jämfört med GKM: <strong>{comparisonFor(selectedCase)}</strong>.</p><p className="hint">Kontrollera underlag, trappor, lutning, hinder och tillgänglighet. GKM:s ursprungliga motivering är inte dokumenterad.</p><label>Beslut<select value={review.decision} onChange={e=>update('decision',e.target.value)}><option value="">Välj bedömning</option>{decisions.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select></label><label>Orsak<select value={review.reason} onChange={e=>update('reason',e.target.value)}>{reasons.map(r=><option key={r} value={r}>{r||'Välj orsak'}</option>)}</select></label><label>Kommentar<textarea rows={5} value={review.comment} onChange={e=>update('comment',e.target.value)} placeholder="Vad motiverar bedömningen?"/></label><label>Granskare<input value={review.reviewer} onChange={e=>update('reviewer',e.target.value)} placeholder="Namn"/></label><p className="hint">Bedömningar finns endast i den här öppna sidan tills de exporteras. Exportera innan du stänger eller laddar om.</p></>}</>}</aside></main></div></div>;
 }
-
-

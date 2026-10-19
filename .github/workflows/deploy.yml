@@ -41,6 +41,7 @@ jobs:
 
       - name: Unpack review data
         run: |
+          rm -f dist/review-data.json dist/review-data_before_endpoint_ui.json
           gzip -dc dist/review-data.json.gz > dist/review-data.json
           rm dist/review-data.json.gz
 

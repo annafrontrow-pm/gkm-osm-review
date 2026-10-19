@@ -1421,3 +1421,38 @@ button.overview-kpi.overview-clickable:focus-visible {
     max-width: calc(100% - 16px);
   }
 }
+
+
+/* Start- och slutpunkter i sträcklistan */
+.sidebar .case-list .case-endpoint-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sidebar .case-list .case-endpoint-marker.start {
+  background: #16803c;
+}
+
+.sidebar .case-list .case-endpoint-marker.end {
+  background: #c43232;
+}
+
+
+
+/* SVG-symbolen centreras av flexbehållaren */
+.sidebar .case-list .case-endpoint-marker.start svg,
+.map-key-point.start svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
