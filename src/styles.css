@@ -1294,3 +1294,130 @@ button.overview-kpi.overview-clickable:focus-visible {
   border-color: #a21caf;
   border-top-style: dashed;
 }
+
+
+/* Gemensam panel för kartförklaring och lagerkontroller */
+.map-panel .map-key {
+  width: 260px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 65px);
+  overflow-y: auto;
+  gap: 8px;
+}
+
+.map-key .map-key-layer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.map-key-layer input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0 3px 0 0;
+}
+
+.map-key-layer .map-key-line {
+  flex: 0 0 30px;
+}
+
+.map-key-layer .map-key-point {
+  flex: 0 0 22px;
+  margin: 0;
+}
+
+.map-key-settings {
+  border-top: 1px solid #e4e7ec;
+  padding-top: 9px;
+  margin-top: 3px;
+}
+
+.map-key-settings > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #344054;
+}
+
+.map-key-settings label {
+  display: block;
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+
+.map-key-settings select {
+  width: 100%;
+  margin-top: 5px;
+  padding: 7px;
+  font-size: 12px;
+}
+
+.map-key-add-explanation {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.map-key-add-explanation > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 650px) {
+  .map-panel .map-key {
+    max-width: calc(100% - 16px);
+    max-height: calc(100% - 50px);
+  }
+}
+
+/* Säkerställ att kartpanelen tar emot musinteraktioner */
+.map-panel .map-key {
+  position: absolute;
+  z-index: 1000;
+  pointer-events: auto;
+  isolation: isolate;
+}
+
+/* Kollapsbar huvudpanel för karta och lager */
+.map-panel .map-key {
+  display: block;
+  width: max-content;
+  min-width: 165px;
+  max-width: min(280px, calc(100% - 32px));
+}
+
+.map-panel .map-key[open] {
+  display: grid;
+  width: 260px;
+}
+
+.map-key > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: #344054;
+  list-style-position: inside;
+}
+
+.map-key > summary:hover {
+  color: #6941c6;
+}
+
+.map-key > summary:focus-visible {
+  outline: 2px solid #6941c6;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+@media (max-width: 650px) {
+  .map-panel .map-key {
+    max-width: calc(100% - 16px);
+  }
+}
