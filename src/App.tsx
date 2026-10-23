@@ -21,7 +21,7 @@ function stopLabel(point: StopPointInfo|undefined, gid: string) {
 function stopSourceLabel(point: StopPointInfo|undefined) {
   return point?.source === 'historical' ? 'Historisk uppgift' : point?.source === 'gid_only' || !point ? 'Ej identifierat' : '';
 }
-type Case = { start_stop_point?: StopPointInfo; end_stop_point?: StopPointInfo; quality_category?: string; case_id: string; grid_cell: string; severity_band: string; start_gid: string; end_gid: string; related_directed_links: number; otp_60_length_ratio: number|null; details?: Record<string,string|number|null>; contains_add?: boolean|null; municipalities?: Array<{number:string;name:string}> };
+type Case = { quality_category?: string; case_id: string; grid_cell: string; severity_band: string; start_gid: string; end_gid: string; related_directed_links: number; otp_60_length_ratio: number|null; details?: Record<string,string|number|null>; contains_add?: boolean|null; municipalities?: Array<{number:string;name:string}>; stop_areas?: Array<{gid:string;name:string|null}>; start_stop_point?: StopPointInfo; end_stop_point?: StopPointInfo };
 type Cluster = { cluster_id:string; directed_cases:number; add_cases:number; no_add_cases:number; max_saved_m:number; case_ids:string[] }; 
 type Review = { decision: string; reason: string; comment: string; reviewer: string };
 type Data = { cases: Case[]; gkm: FeatureCollection; otp: FeatureCollection; add?: FeatureCollection; stop_points?: FeatureCollection; category_counts?: Record<string,number> };
@@ -66,6 +66,10 @@ export default function App() {
   const baseLayerRef = useRef<TileLayer<OSM|XYZ>|null>(null);
   const [baseMap,setBaseMap] = useState<'osm'|'aerial'>('osm');
   const [activeView,setActiveView] = useState<'overview'|'map'>('map');
+  const [stopAreaMinCount,setStopAreaMinCount] = useState(0);
+  const [stopAreaSort,setStopAreaSort] = useState<'deviations'|'share'|'total'|'name'>('deviations');
+  const [stopAreaSelected,setStopAreaSelected] = useState('');
+  const [deviationsOnly,setDeviationsOnly] = useState(false);
   const [municipalityMinCount,setMunicipalityMinCount] = useState(100);
   const [municipalitySort,setMunicipalitySort] = useState<'low'|'high'|'partial'|'total'|'name'|'add'|'addUnknown'>('low');
 
@@ -74,7 +78,7 @@ export default function App() {
   const popupNode = useRef<HTMLDivElement>(null);
   const [pointInfo,setPointInfo] = useState<{id:string;role:string;name:string;stop_area_number:string;designation:string;source:string}|null>(null);
   const [inspected,setInspected] = useState<'stop'|'gkm'|'otp'|null>(null);
-  const [clusters,setClusters] = useState<Cluster[]>([]); const [clusterId,setClusterId] = useState(''); const [showClusterAll,setShowClusterAll] = useState(true);
+  const [clusters,setClusters] = useState<Cluster[]>([]); const [clusterId,setClusterId] = useState(''); const [showClusterAll,setShowClusterAll]= useState(true);
   const [reviewPanelOpen,setReviewPanelOpen] = useState(true); const [data,setData] = useState<Data|null>(null); const [error,setError] = useState('');
   const [selected,setSelected] = useState('');
   const [reviews,setReviews] = useState<Record<string,Review>>(() => {
@@ -206,18 +210,27 @@ export default function App() {
     "PARTIAL_GEOMETRY_AGREEMENT",
     "LOW_GEOMETRY_AGREEMENT"
   ].includes(c.quality_category??"");
+  const ratioForMode=(c:Case,mode:'distance'|'time'):number|null=>{
+    if(mode==='distance')return c.otp_60_length_ratio;
+    const g=metricForRaw(c.details?.duration_seconds),o=metricForRaw(c.details?.otp_duration_s);
+    return g!==null&&o!==null&&g>0&&o>0?o/g:null;
+  };
   const lengthMatches=(c:Case)=>{
     if(lengthRange===null)return true;
     const range=lengthRanges[lengthRange];
-    const ratio=c.otp_60_length_ratio;
+    const ratio=ratioForMode(c,comparisonMode);
     return Boolean(range&&typeof ratio==="number"&&Number.isFinite(ratio)&&ratio>0&&ratio>=range.min&&ratio<range.max);
   };
   const qualityMatches=(c:Case)=>qualityFilter==='ALL'||c.quality_category===qualityFilter;
   const addMatches=(c:Case)=>addFilter==='all'||(addFilter==='yes'?c.contains_add===true:addFilter==='no'?c.contains_add===false:c.contains_add==null);
   const metricForRaw=(raw:unknown):number|null=>{if(raw===null||raw===undefined||raw==='')return null;const n=Number(raw);return Number.isFinite(n)&&n>=0?n:null;};
-  const classifyCase=(c:Case)=>{if(comparisonMode==='distance')return c.severity_band;if(c.severity_band==='NOT_ELIGIBLE'||c.severity_band==='NO_ROUTE')return c.severity_band;const g=metricForRaw(c.details?.duration_seconds),o=metricForRaw(c.details?.otp_duration_s);if(g===null||o===null||g<=0||o<=0)return 'OTHER';const ratio=o/g;return ratio<.5?'VERY_SHORT':ratio<.75?'MODERATELY_SHORT':ratio<.9?'SLIGHTLY_SHORT':ratio<=1.1?'SIMILAR':'LONGER';};
+  const classifyForMode=(c:Case,mode:'distance'|'time')=>{if(mode==='distance')return c.severity_band;if(c.severity_band==='NOT_ELIGIBLE'||c.severity_band==='NO_ROUTE')return c.severity_band;const g=metricForRaw(c.details?.duration_seconds),o=metricForRaw(c.details?.otp_duration_s);if(g===null||o===null||g<=0||o<=0)return 'OTHER';const ratio=o/g;return ratio<.5?'VERY_SHORT':ratio<.75?'MODERATELY_SHORT':ratio<.9?'SLIGHTLY_SHORT':ratio<=1.1?'SIMILAR':'LONGER';};
+  const classifyCase=(c:Case)=>classifyForMode(c,comparisonMode);
+  const isDeviationForMode=(c:Case,mode:'distance'|'time')=>['LONGER','MODERATELY_SHORT','VERY_SHORT'].includes(classifyForMode(c,mode));
   const categoryLabel=(value:string)=>{const labels:Record<string,string>={SIMILAR:'Likvärdig tid (±10 %)',SLIGHTLY_SHORT:'OTP 10–25 % snabbare',MODERATELY_SHORT:'OTP 25–50 % snabbare',VERY_SHORT:'OTP över 50 % snabbare',LONGER:'OTP över 10 % långsammare',OTHER:'Övriga/ej tidsjämförbara'};return comparisonMode==='time'?(labels[value]??categoryOptions.find(o=>o.value===value)?.label??value):(categoryOptions.find(o=>o.value===value)?.label??value);};
   const municipalities=useMemo(()=>{const m=new globalThis.Map<string,string>();for(const c of data?.cases??[])for(const v of c.municipalities??[])m.set(v.number,v.name);return [...m].sort((a,b)=>a[1].localeCompare(b[1],'sv'));},[data]);
+  const isSelectedDeviation=(c:Case)=>isDeviationForMode(c,comparisonMode);
+  const stopAreaMatches=(c:Case)=>!stopAreaSelected||Boolean(c.stop_areas?.some(a=>a.gid===stopAreaSelected));
   const clusterIds=useMemo(()=>new Set(clusters.find(c=>c.cluster_id===clusterId)?.case_ids??[]),[clusters,clusterId]);
   const municipalityCounts=useMemo(()=>{
     const result:Record<string,number>={};
@@ -226,6 +239,8 @@ export default function App() {
       if(
         (clusterId&&!clusterIds.has(c.case_id))||
         (filter!=='ALL'&&classifyCase(c)!==filter)||
+        !stopAreaMatches(c)||
+        (deviationsOnly&&!isSelectedDeviation(c))||
         !addMatches(c)||
         !qualityMatches(c)||
         !lengthMatches(c)||
@@ -240,12 +255,14 @@ export default function App() {
       }
     }
     return result;
-  },[data,filter,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery]);
+  },[data,filter,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery,stopAreaSelected,deviationsOnly]);
   const municipalityMatches=(c:Case)=>(!municipalitiesSelected.length||municipalitiesSelected.some(number=>number==='UNKNOWN'?!(c.municipalities?.length):c.municipalities?.some(m=>m.number===number)));
   const clusterMatchCounts=useMemo(()=>{
     const matchingIds=new Set(
       (data?.cases??[])
         .filter(c=>
+          stopAreaMatches(c)&&
+          (!deviationsOnly||isSelectedDeviation(c))&&
           municipalityMatches(c)&&
           addMatches(c)&&
           qualityMatches(c)&&
@@ -265,8 +282,8 @@ export default function App() {
         cluster.case_ids.filter(id=>matchingIds.has(id)).length
       ])
     ) as Record<string,number>;
-  },[data,clusters,filter,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery]);
-  const cases=useMemo(()=>data?.cases.filter(c=>(!clusterId||clusterIds.has(c.case_id))&&municipalityMatches(c)&&addMatches(c)&&qualityMatches(c)&&lengthMatches(c)&&(!comparableOnly||isComparable(c))&&(filter==='ALL'||classifyCase(c)===filter)&&(!caseQuery.trim()||[c.start_gid,c.end_gid,c.case_id].some(v=>String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv")))))??[],[data,filter,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery]);
+  },[data,clusters,filter,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery,stopAreaSelected,deviationsOnly]);
+  const cases=useMemo(()=>data?.cases.filter(c=>(!clusterId||clusterIds.has(c.case_id))&&municipalityMatches(c)&&stopAreaMatches(c)&&(!deviationsOnly||isSelectedDeviation(c))&&addMatches(c)&&qualityMatches(c)&&lengthMatches(c)&&(!comparableOnly||isComparable(c))&&(filter==='ALL'||classifyCase(c)===filter)&&(!caseQuery.trim()||[c.start_gid,c.end_gid,c.case_id].some(v=>String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv")))))??[],[data,filter,municipalitiesSelected,stopAreaSelected,deviationsOnly,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,clusterId,clusterIds,caseQuery]);
   useEffect(()=>{
     if(!data)return;
     if(cases.some(c=>c.case_id===selected))return;
@@ -285,6 +302,8 @@ export default function App() {
     option.value,
     data?.cases.filter(c=>
       (!clusterId||clusterIds.has(c.case_id))&&
+      stopAreaMatches(c)&&
+      (!deviationsOnly||isSelectedDeviation(c))&&
       municipalityMatches(c)&&
       addMatches(c)&&
       qualityMatches(c)&&
@@ -295,10 +314,13 @@ export default function App() {
         String(v??"").toLocaleLowerCase("sv").includes(caseQuery.trim().toLocaleLowerCase("sv"))
       ))
     ).length??0
-  ])),[data,clusterId,clusterIds,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery]);
+  ])),[data,clusterId,clusterIds,municipalitiesSelected,addFilter,comparisonMode,qualityFilter,lengthRange,comparableOnly,caseQuery,stopAreaSelected,deviationsOnly]);
   type OverviewSelection = {
     quality?: string;
     municipality?: string;
+    stopArea?: string;
+    deviationsOnly?: boolean;
+    comparison?: 'distance'|'time';
     add?: 'all'|'yes'|'no'|'unknown';
     length?: number|null;
     comparable?: boolean;
@@ -312,6 +334,8 @@ export default function App() {
     ].includes(qualityFilter),
     addFilter!=="all",
     municipalitiesSelected.length>0,
+    Boolean(stopAreaSelected),
+    deviationsOnly,
     lengthRange!==null,
     filter!=="ALL",
     Boolean(clusterId),
@@ -324,6 +348,8 @@ export default function App() {
     setLengthRange(null);
     setComparableOnly(false);
     setMunicipalitiesSelected([]);
+    setStopAreaSelected("");
+    setDeviationsOnly(false);
     setMunicipalityQuery("");
     setCaseQuery("");
     setClusterId("");
@@ -341,7 +367,10 @@ export default function App() {
     setLengthRange(length);
     setComparableOnly(comparable);
     if(selection.municipality)setMunicipalitiesSelected([selection.municipality]);
-    setComparisonMode("distance");
+    if(selection.stopArea)setStopAreaSelected(selection.stopArea);
+    setDeviationsOnly(selection.deviationsOnly??false);
+    const selectionMode=selection.comparison??comparisonMode;
+    setComparisonMode(selectionMode);
     const range=length===null?null:lengthRanges[length];
     const first=data?.cases.find(c=>
       (quality==="ALL"||c.quality_category===quality)&&
@@ -352,13 +381,13 @@ export default function App() {
           ? !c.municipalities?.length
           : c.municipalities?.some(m=>m.number===selection.municipality)
       ))&&
+       (!selection.stopArea||c.stop_areas?.some(a=>a.gid===selection.stopArea))&&
+       (!selection.deviationsOnly||isDeviationForMode(c,selectionMode))&&
       (!comparable||isComparable(c))&&
       (!range||(
-        typeof c.otp_60_length_ratio==="number"&&
-        Number.isFinite(c.otp_60_length_ratio)&&
-        c.otp_60_length_ratio>0&&
-        c.otp_60_length_ratio>=range.min&&
-        c.otp_60_length_ratio<range.max
+        ratioForMode(c,selectionMode)!==null&&
+        (ratioForMode(c,selectionMode) as number)>=range.min&&
+        (ratioForMode(c,selectionMode) as number)<range.max
       ))
     );
     setSelected(first?.case_id??"");
@@ -392,8 +421,18 @@ export default function App() {
     return Number.isFinite(n)?n.toLocaleString('sv-SE',{maximumFractionDigits:1})+' m':'Ej tillgängligt';
   };
   const detail=(name:string,value:unknown)=><p><strong>{name}:</strong> {value===undefined||value===null||value===''?'Ej tillgängligt':String(value)}</p>;
-  return <div className="app"><header><div><div className="eyebrow">Team Geografi · pilot</div><h1>Utvärdering av OSM som alternativ till GKM:s gångvägar</h1><p>Vi jämför gångvägar beräknade med OpenStreetMap (OSM) och OpenTripPlanner (OTP) med befintliga gångvägar i GKM för att bedöma hur väl OSM kan ersätta dagens underlag.</p></div><nav className="main-view-tabs" aria-label="Huvudvy"><button type="button" className={activeView==="overview"?"active":""} aria-current={activeView==="overview"?"page":undefined} onClick={()=>setActiveView("overview")}>Översikt</button><button type="button" className={activeView==="map"?"active":""} aria-current={activeView==="map"?"page":undefined} onClick={()=>setActiveView("map")}>Karta och granskning</button></nav><div className="header-actions"><button className="primary" disabled={!reviewed} onClick={()=>data&&exportCsv(data.cases,reviews)}>Exportera bedömningar ({reviewed})</button></div></header><section className="population-overview" hidden={activeView!=="overview"}>
+  return <div className="app"><header style={{display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:16,padding:'10px 20px',minHeight:0,flexWrap:'wrap'}}>
+  <div style={{flex:'1 1 270px',minWidth:220,maxWidth:480}}>
+    <div className="eyebrow" style={{fontSize:10,marginBottom:2}}>Team Geografi · pilot</div>
+    <h1 style={{fontSize:17,lineHeight:1.2,margin:0}}>OSM som alternativ till GKM:s gångvägar</h1>
+  </div>
+  <nav className="main-view-tabs" aria-label="Huvudvy" style={{margin:0,flexShrink:0}}><button type="button" className={activeView==="overview"?"active":""} aria-current={activeView==="overview"?"page":undefined} onClick={()=>setActiveView("overview")}>Översikt</button><button type="button" className={activeView==="map"?"active":""} aria-current={activeView==="map"?"page":undefined} onClick={()=>setActiveView("map")}>Karta & granskning</button></nav>
+  <div className="comparison-toggle" role="group" aria-label="Jämför gångvägar efter sträcka eller tid" style={{flexShrink:0,margin:0}}><button type="button" className={comparisonMode==='distance'?'active':''} aria-pressed={comparisonMode==='distance'} onClick={()=>setComparisonMode('distance')}>Sträcka</button><button type="button" className={comparisonMode==='time'?'active':''} aria-pressed={comparisonMode==='time'} onClick={()=>setComparisonMode('time')}>Tid</button></div>
+  <button type="button" className="primary" style={{flexShrink:0,padding:'10px 14px',fontSize:13,whiteSpace:'nowrap'}} disabled={!reviewed} onClick={()=>data&&exportCsv(data.cases,reviews)} title={`Exportera ${reviewed} bedömningar`}>↓ Exportera ({reviewed})</button>
+</header><section className="population-overview" hidden={activeView!=="overview"}>
   <h2>Populationsöversikt</h2>
+  <p className="overview-note">Vi jämför gångvägar beräknade med OpenStreetMap (OSM) och OpenTripPlanner (OTP) med befintliga gångvägar i GKM för att bedöma hur väl OSM kan ersätta dagens underlag.</p>
+  <p className="overview-note" role="status">{comparisonMode==='distance'?'Jämförelseläge: Sträcka. Längdskillnader visas i analyserna längre ned.':'Jämförelseläge: Tid. Tidsskillnader visas i analyserna längre ned. Tiderna kan bygga på olika hastighetsmodeller.'}</p>
   <p>Geometrisk jämförelse mellan GKM och OTP/OSM. Samtliga riktade gånglänkar ingår.</p>
   {data && (() => {
     const counts = Object.fromEntries(
@@ -421,12 +460,12 @@ export default function App() {
 
     const lengthCases = data.cases.filter(c =>
       categories.some(category => category.key === c.quality_category) &&
-      typeof c.otp_60_length_ratio === "number" &&
-      Number.isFinite(c.otp_60_length_ratio) &&
-      c.otp_60_length_ratio > 0
+      typeof ratioForMode(c,comparisonMode) === "number" &&
+      Number.isFinite(ratioForMode(c,comparisonMode)) &&
+      (ratioForMode(c,comparisonMode) as number) > 0
     );
     const lengthValues = lengthCases
-      .map(c => c.otp_60_length_ratio as number)
+      .map(c => ratioForMode(c,comparisonMode) as number)
       .sort((a,b) => a-b);
     const lengthPercentile = (p:number) =>
       lengthValues.length
@@ -435,18 +474,18 @@ export default function App() {
     const lengthFmt = (n:number|null) =>
       n===null ? "–" : n.toLocaleString("sv-SE",{maximumFractionDigits:3});
     const lengthBins = [
-      {label:"OTP minst 20 % kortare", min:0, max:0.8},
-      {label:"OTP 5–20 % kortare", min:0.8, max:0.95},
-      {label:"Ungefär samma längd (±5 %)", min:0.95, max:1.05},
-      {label:"OTP 5–20 % längre", min:1.05, max:1.2},
-      {label:"OTP 20–50 % längre", min:1.2, max:1.5},
-      {label:"OTP 50–100 % längre", min:1.5, max:2},
-      {label:"OTP 2–3 gånger så lång", min:2, max:3},
-      {label:"OTP mer än 3 gånger så lång", min:3, max:Infinity}
+      {label:`OTP minst 20 % ${comparisonMode==='distance'?'kortare':'snabbare'}`, min:0, max:0.8},
+      {label:`OTP 5–20 % ${comparisonMode==='distance'?'kortare':'snabbare'}`, min:0.8, max:0.95},
+      {label:`Ungefär samma ${comparisonMode==='distance'?'längd':'tid'} (±5 %)`, min:0.95, max:1.05},
+      {label:`OTP 5–20 % ${comparisonMode==='distance'?'längre':'långsammare'}`, min:1.05, max:1.2},
+      {label:`OTP 20–50 % ${comparisonMode==='distance'?'längre':'långsammare'}`, min:1.2, max:1.5},
+      {label:`OTP 50–100 % ${comparisonMode==='distance'?'längre':'långsammare'}`, min:1.5, max:2},
+      {label:`OTP 2–3 gånger så ${comparisonMode==='distance'?'lång':'långsam'}`, min:2, max:3},
+      {label:`OTP mer än 3 gånger så ${comparisonMode==='distance'?'lång':'långsam'}`, min:3, max:Infinity}
     ].map(bin => {
       const subset = lengthCases.filter(c =>
-        (c.otp_60_length_ratio as number)>=bin.min &&
-        (c.otp_60_length_ratio as number)<bin.max
+        (ratioForMode(c,comparisonMode) as number)>=bin.min &&
+        (ratioForMode(c,comparisonMode) as number)<bin.max
       );
       return {
         ...bin,
@@ -459,7 +498,7 @@ export default function App() {
     });
     const maxLengthBin = Math.max(1,...lengthBins.map(bin=>bin.total));
     const openLengthRange = (index:number,quality:string="ALL") =>
-      openOverviewSelection({length:index,quality});
+      openOverviewSelection({length:index,quality,comparison:comparisonMode});
     const addCounts = {
       yes: data.cases.filter(c=>c.contains_add===true).length,
       no: data.cases.filter(c=>c.contains_add===false).length,
@@ -526,6 +565,23 @@ export default function App() {
           -numerator(a)/Math.max(a.comparable,1);
         return difference || b.comparable-a.comparable;
       });
+    const stopAreaStats = new globalThis.Map<string,{gid:string;name:string|null;total:number;deviations:number;municipalities:Set<string>}>();
+    for(const c of data.cases){
+      for(const area of c.stop_areas??[]){
+        const row=stopAreaStats.get(area.gid)??{gid:area.gid,name:area.name,total:0,deviations:0,municipalities:new Set<string>()};
+        if(!row.name&&area.name)row.name=area.name;
+        row.total++;
+        if(isDeviationForMode(c,comparisonMode))row.deviations++;
+        for(const m of c.municipalities??[])row.municipalities.add(m.name);
+        stopAreaStats.set(area.gid,row);
+      }
+    }
+    const stopAreaRows=[...stopAreaStats.values()].filter(r=>r.total>=stopAreaMinCount).sort((a,b)=>{
+      if(stopAreaSort==='name')return (a.name??a.gid).localeCompare(b.name??b.gid,'sv');
+      if(stopAreaSort==='total')return b.total-a.total||a.gid.localeCompare(b.gid);
+      if(stopAreaSort==='share')return b.deviations/b.total-a.deviations/a.total||b.deviations-a.deviations;
+      return b.deviations-a.deviations||b.total-a.total;
+    });
     const unknownMunicipality = municipalityStats.get("Okänd kommun");
     const openMunicipality = (number:string,quality:string="ALL") =>
       openOverviewSelection({municipality:number,quality});
@@ -578,14 +634,14 @@ export default function App() {
       </div>
 
       <section className="overview-panel length-analysis-panel">
-        <h3>Skillnader i gångvägarnas längd</h3>
-        <p>OTP:s beräknade gångvägslängd i förhållande till GKM. Analysen omfattar {fmt(lengthCases.length)} geometriskt jämförbara gångvägar med giltig längdkvot.</p>
+        <h3>Skillnader i gångvägarnas {comparisonMode==='distance'?'längd':'gångtid'}</h3>
+        <p>OTP:s beräknade {comparisonMode==='distance'?'gångvägslängd':'gångtid'} i förhållande till GKM. Analysen omfattar {fmt(lengthCases.length)} geometriskt jämförbara gångvägar med giltig {comparisonMode==='distance'?'längdkvot':'tidskvot'}.</p>
         <div className="add-summary">
           <div><span>Median, OTP/GKM</span><strong>{lengthFmt(lengthPercentile(0.5))}</strong><small>Hälften av gångvägarna ligger under detta värde</small></div>
           <div><span>90:e percentilen</span><strong>{lengthFmt(lengthPercentile(0.9))}</strong><small>90 % ligger på eller under värdet</small></div>
           <div><span>95:e percentilen</span><strong>{lengthFmt(lengthPercentile(0.95))}</strong><small>95 % ligger på eller under värdet</small></div>
         </div>
-        <h4>Fördelning av längdskillnader</h4>
+        <h4>Fördelning av {comparisonMode==='distance'?'längdskillnader':'tidsskillnader'}</h4>
         <p>Staplarna visar antal gångvägar per intervall, fördelat efter geometrisk överensstämmelse.</p>
         <div className="length-bin-chart">
           {lengthBins.map(bin=><div className="length-bin-row" key={bin.label}>
@@ -621,7 +677,7 @@ export default function App() {
             {category.label}
           </span>)}
         </div>
-        <p className="overview-note">Längdkvot 1 innebär samma längd. Ett värde över 1 innebär att OTP:s väg är längre än GKM:s. Längdlikhet innebär inte nödvändigtvis att gångvägarna följer samma sträckning. Intervallen är beskrivande och utgör inte acceptanskriterier.</p>
+        <p className="overview-note">{comparisonMode==='distance'?'Längdkvot 1 innebär samma längd. Ett värde över 1 innebär att OTP:s väg är längre än GKM:s. Längdlikhet innebär inte nödvändigtvis att gångvägarna följer samma sträckning.':'Tidskvot 1 innebär samma gångtid. Ett värde över 1 innebär att OTP:s gångtid är längre än GKM:s. Källornas hastighetsmodeller kan skilja sig, så tidsavvikelser visar inte i sig fel i gångvägsnätet.'} Intervallen är beskrivande och utgör inte acceptanskriterier.</p>
       </section>
       <section className="overview-panel add-analysis-panel">
         <h3>ADD-förbindelser i GKM:s gångvägar</h3>
@@ -689,7 +745,7 @@ export default function App() {
           </label>
         </div>
         <p>Visar {municipalityRows.length} av {municipalityStats.size-(unknownMunicipality?1:0)} kommuner.</p>
-        <p className="overview-note">ADD-andel och okänd ADD-status beräknas på samtliga analyserade gångvägar. Jämförelsen med/utan ADD omfattar endast geometriskt jämförbara gångvägar. Grupper med färre än 30 jämförbara markeras med †.</p>
+        <p className="overview-note">ADD-andel och okänd ADD-status beräknas på samtliga analyserade gångvägar. Jämförelsen med/utan ADD omfattarendast geometriskt jämförbara gångvägar. Grupper med färre än 30 jämförbara markeras med †.</p>
         <div className="municipality-table-wrap">
           <table className="municipality-table">
             <thead><tr>
@@ -735,11 +791,43 @@ export default function App() {
         {unknownMunicipality && <p className="overview-note">
           {fmt(unknownMunicipality.total)} länkar saknar kommun och ingår i populationsstatistiken men inte i kommunrankningen.
         </p>}
-      </section>
+       </section>
+       <section className="overview-panel municipality-panel">
+          <h3>Skillnader i {comparisonMode==='distance'?'gångvägslängd':'gångtid'} per hållplatsområde</h3>
+          <p>Riktade gångrelationer per berört hållplatsområde. En relation mellan två områden ingår i båda områdenas statistik. {comparisonMode==='distance'?'Längdavvikelser (OTP över 10 % längre eller minst 25 % kortare)':'Tidsavvikelser (OTP över 10 % långsammare eller minst 25 % snabbare)'} är kandidater för granskning, inte verifierade fel.</p>
+          {comparisonMode==='time'&&<p className="overview-note">Gångtiderna kan bygga på olika hastighetsmodeller. Tidsavvikelser är därför inte i sig belägg för brister i gångvägsnätet.</p>}
+
+         <div className="municipality-controls">
+           <label>Minst antal relationer
+             <select value={stopAreaMinCount} onChange={e=>setStopAreaMinCount(Number(e.target.value))}>
+               <option value={0}>Alla områden</option><option value={30}>30</option><option value={100}>100</option><option value={300}>300</option><option value={500}>500</option>
+             </select>
+           </label>
+           <label>Sortera efter
+             <select value={stopAreaSort} onChange={e=>setStopAreaSort(e.target.value as typeof stopAreaSort)}>
+               <option value="deviations">Flest {comparisonMode==='distance'?'längd':'tids'}avvikelser</option><option value="share">Högst andel {comparisonMode==='distance'?'längd':'tids'}avvikelser</option><option value="total">Flest gångrelationer</option><option value="name">Områdesnamn</option>
+             </select>
+           </label>
+         </div>
+         <p>Visar {fmt(stopAreaRows.length)} av {fmt(stopAreaStats.size)} hållplatsområden.</p>
+         <div className="municipality-table-wrap">
+           <table className="municipality-table">
+             <thead><tr><th>Hållplatsområde</th><th>Kommun i analysunderlaget</th><th>Gångrelationer</th><th>{comparisonMode==='distance'?'Längdavvikelser':'Tidsavvikelser'}</th><th>Andel avvikelser</th></tr></thead>
+             <tbody>{stopAreaRows.map(r=><tr key={r.gid}>
+               <td><button type="button" className="municipality-link" title={r.gid} onClick={()=>openOverviewSelection({stopArea:r.gid,comparison:comparisonMode})}>{r.name??r.gid}</button>{!r.name&&<small> (namn saknas)</small>}</td>
+               <td>{[...r.municipalities].sort((a,b)=>a.localeCompare(b,'sv')).join(', ')||'Okänd kommun'}</td>
+               <td><button type="button" className="municipality-link" onClick={()=>openOverviewSelection({stopArea:r.gid,comparison:comparisonMode})}>{fmt(r.total)}</button></td>
+               <td><button type="button" className="municipality-link" disabled={!r.deviations} onClick={()=>openOverviewSelection({stopArea:r.gid,deviationsOnly:true,comparison:comparisonMode})}>{fmt(r.deviations)}</button></td>
+               <td><button type="button" className="municipality-link" disabled={!r.deviations} onClick={()=>openOverviewSelection({stopArea:r.gid,deviationsOnly:true,comparison:comparisonMode})}>{pct(r.deviations,r.total)}</button></td>
+             </tr>)}</tbody>
+           </table>
+         </div>
+         <p className="overview-note">De 54 områden som saknar namn visas med GID. Avvikelseandelen baseras på samtliga relationer i respektive område, även sådana som inte är jämförbara. Kommunuppgifterna är hämtade från befintlig berikning och kan vara ofullständiga.</p>
+       </section>
     </>;
   })()}
 </section><div className="map-view-container" hidden={activeView!=="map"}><main className={reviewPanelOpen?"":"review-collapsed"}><aside className="sidebar"><div className="route-list-section"><h2>Sträckor ({cases.length.toLocaleString("sv-SE")})</h2>
-<div className="comparison-toggle" role="group" aria-label="Jämför efter"><button type="button" className={comparisonMode==="distance"?"active":""} aria-pressed={comparisonMode==="distance"} onClick={()=>setComparisonMode("distance")}>Sträcka</button><button type="button" className={comparisonMode==="time"?"active":""} aria-pressed={comparisonMode==="time"} onClick={()=>setComparisonMode("time")}>Tid</button></div><input className="case-search" type="search" aria-label="Sök sträcka" placeholder="Sök hållplatsnummer, GID eller case-ID…" value={caseQuery} onChange={e=>{setCaseQuery(e.target.value);setVisibleLimit(150);}}/>{caseQuery.trim()&&searchMatchCount>cases.length&&
+<input className="case-search" type="search" aria-label="Sök sträcka" placeholder="Sök hållplatsnummer, GID eller case-ID…" value={caseQuery} onChange={e=>{setCaseQuery(e.target.value);setVisibleLimit(150);}}/>{caseQuery.trim()&&searchMatchCount>cases.length&&
   <div className="hint" role="status">
     Visar {cases.length.toLocaleString("sv-SE")} av {searchMatchCount.toLocaleString("sv-SE")} matchande sträckor.
     Andra filter begränsar resultatet.
@@ -779,13 +867,15 @@ export default function App() {
             <button type="button" onClick={()=>setAddFilter("all")}>
               ADD: {addFilter==="yes"?"Ja":addFilter==="no"?"Nej":"Okänd"} ×
             </button>}
-          {municipalitiesSelected.length>0&&
+          {stopAreaSelected&&<button type="button" onClick={()=>setStopAreaSelected("")}>Hållplatsområde: {stopAreaSelected} ×</button>}
+           {deviationsOnly&&<button type="button" onClick={()=>setDeviationsOnly(false)}>Endast {comparisonMode==='distance'?'längdavvikelser':'tidsavvikelser'} ×</button>}
+           {municipalitiesSelected.length>0&&
             <button type="button" onClick={()=>setMunicipalitiesSelected([])}>
               Kommuner ({municipalitiesSelected.length}) ×
             </button>}
           {lengthRange!==null&&
             <button type="button" onClick={()=>setLengthRange(null)}>
-              Längdkvot: {lengthRanges[lengthRange].label} ×
+              Kvot ({comparisonMode==='distance'?'sträcka':'tid'}): {comparisonMode==='distance'?lengthRanges[lengthRange].label:lengthRanges[lengthRange].label.replace('kortare','snabbare').replace('längre','långsammare').replace('längd','tid').replace('lång','långsam')} ×
             </button>}
           {filter!=="ALL"&&
             <button type="button" onClick={()=>setFilter("ALL")}>
@@ -805,6 +895,8 @@ export default function App() {
 
 <label htmlFor="cluster-select">Granskningskluster</label><select id="cluster-select" value={clusterId} disabled={!clusters.length} onChange={e=>{
   setClusterId(e.target.value);
+  setStopAreaSelected('');
+  setDeviationsOnly(false);
   setVisibleLimit(150);
   const nextCluster=clusters.find(c=>c.cluster_id===e.target.value);
   const nextIds=nextCluster?new Set(nextCluster.case_ids):null;
